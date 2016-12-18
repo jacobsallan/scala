@@ -2,17 +2,18 @@ package scala.tools.nsc
 package backend.jvm
 package analysis
 
+import java.lang.invoke.LambdaMetafactory
+
 import scala.annotation.switch
-import scala.tools.asm.{Handle, Type}
+import scala.collection.JavaConverters._
+import scala.collection.mutable
 import scala.tools.asm.Opcodes._
 import scala.tools.asm.tree._
-import scala.tools.asm.tree.analysis.{Frame, BasicInterpreter, Analyzer, Value}
-import GenBCode._
+import scala.tools.asm.tree.analysis._
+import scala.tools.asm.{Handle, Type}
 import scala.tools.nsc.backend.jvm.BTypes._
+import scala.tools.nsc.backend.jvm.GenBCode._
 import scala.tools.nsc.backend.jvm.opt.BytecodeUtils._
-import java.lang.invoke.LambdaMetafactory
-import scala.collection.mutable
-import scala.collection.JavaConverters._
 
 /**
  * This component hosts tools and utilities used in the backend that require access to a `BTypes`
@@ -32,7 +33,12 @@ class BackendUtils[BT <: BTypes](val btypes: BT) {
    */
   class AsmAnalyzer[V <: Value](methodNode: MethodNode, classInternalName: InternalName, val analyzer: Analyzer[V] = new Analyzer(new BasicInterpreter)) {
     computeMaxLocalsMaxStack(methodNode)
-    analyzer.analyze(classInternalName, methodNode)
+    try {
+      analyzer.analyze(classInternalName, methodNode)
+    } catch {
+      case ae: AnalyzerException =>
+        throw new AnalyzerException(null, "While processing " + classInternalName + "." + methodNode.name, ae)
+    }
     def frameAt(instruction: AbstractInsnNode): Frame[V] = analyzer.frameAt(instruction, methodNode)
   }
 
@@ -70,7 +76,7 @@ class BackendUtils[BT <: BTypes](val btypes: BT) {
    * host a static field in the enclosing class. This allows us to add this method to interfaces
    * that define lambdas in default methods.
    */
-  def addLambdaDeserialize(classNode: ClassNode): Unit = {
+  def addLambdaDeserialize(classNode: ClassNode, implMethods: Iterable[Handle]): Unit = {
     val cw = classNode
 
     // Make sure to reference the ClassBTypes of all types that are used in the code generated
@@ -86,7 +92,7 @@ class BackendUtils[BT <: BTypes](val btypes: BT) {
       val mv = cw.visitMethod(ACC_PRIVATE + ACC_STATIC + ACC_SYNTHETIC, "$deserializeLambda$", serlamObjDesc, null, null)
       mv.visitCode()
       mv.visitVarInsn(ALOAD, 0)
-      mv.visitInvokeDynamicInsn("lambdaDeserialize", serlamObjDesc, lambdaDeserializeBootstrapHandle)
+      mv.visitInvokeDynamicInsn("lambdaDeserialize", serlamObjDesc, lambdaDeserializeBootstrapHandle, implMethods.toArray: _*)
       mv.visitInsn(ARETURN)
       mv.visitEnd()
     }
@@ -95,35 +101,36 @@ class BackendUtils[BT <: BTypes](val btypes: BT) {
   /**
    * Clone the instructions in `methodNode` into a new [[InsnList]], mapping labels according to
    * the `labelMap`. Returns the new instruction list and a map from old to new instructions, and
-   * a boolean indicating if the instruction list contains an instantiation of a serializable SAM
-   * type.
+   * a list of lambda implementation methods references by invokedynamic[LambdaMetafactory] for a
+   * serializable SAM types.
    */
-  def cloneInstructions(methodNode: MethodNode, labelMap: Map[LabelNode, LabelNode]): (InsnList, Map[AbstractInsnNode, AbstractInsnNode], Boolean) = {
+  def cloneInstructions(methodNode: MethodNode, labelMap: Map[LabelNode, LabelNode], keepLineNumbers: Boolean): (InsnList, Map[AbstractInsnNode, AbstractInsnNode], List[Handle]) = {
     val javaLabelMap = labelMap.asJava
     val result = new InsnList
     var map = Map.empty[AbstractInsnNode, AbstractInsnNode]
-    var hasSerializableClosureInstantiation = false
+    var inlinedTargetHandles = mutable.ListBuffer[Handle]()
     for (ins <- methodNode.instructions.iterator.asScala) {
-      if (!hasSerializableClosureInstantiation) ins match {
+      ins match {
         case callGraph.LambdaMetaFactoryCall(indy, _, _, _) => indy.bsmArgs match {
-          case Array(_, _, _, flags: Integer, xs@_*) if (flags.intValue & LambdaMetafactory.FLAG_SERIALIZABLE) != 0 =>
-            hasSerializableClosureInstantiation = true
+          case Array(_, targetHandle: Handle, _, flags: Integer, xs@_*) if (flags.intValue & LambdaMetafactory.FLAG_SERIALIZABLE) != 0 =>
+            inlinedTargetHandles += targetHandle
           case _ =>
         }
         case _ =>
       }
-      val cloned = ins.clone(javaLabelMap)
-      result add cloned
-      map += ((ins, cloned))
+      if (keepLineNumbers || !ins.isInstanceOf[LineNumberNode]) {
+        val cloned = ins.clone(javaLabelMap)
+        result add cloned
+        map += ((ins, cloned))
+      }
     }
-    (result, map, hasSerializableClosureInstantiation)
+    (result, map, inlinedTargetHandles.toList)
   }
 
   def getBoxedUnit: FieldInsnNode = new FieldInsnNode(GETSTATIC, srBoxedUnitRef.internalName, "UNIT", srBoxedUnitRef.descriptor)
 
-  private val anonfunAdaptedName = """.*\$anonfun\$\d+\$adapted""".r
+  private val anonfunAdaptedName = """.*\$anonfun\$.*\$\d+\$adapted""".r
   def hasAdaptedImplMethod(closureInit: ClosureInstantiation): Boolean = {
-    isBuiltinFunctionType(Type.getReturnType(closureInit.lambdaMetaFactoryCall.indy.desc).getInternalName) &&
     anonfunAdaptedName.pattern.matcher(closureInit.lambdaMetaFactoryCall.implMethod.getName).matches
   }
 
@@ -247,8 +254,6 @@ class BackendUtils[BT <: BTypes](val btypes: BT) {
       fi.owner == srBoxedUnitRef.internalName && fi.name == "UNIT" && fi.desc == srBoxedUnitRef.descriptor
     }
   }
-
-  def isBuiltinFunctionType(internalName: InternalName): Boolean = functionRefs(internalName)
 
   /**
    * Visit the class node and collect all referenced nested classes.

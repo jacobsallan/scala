@@ -122,7 +122,26 @@ abstract class BTypes {
    * inlining: when inlining an indyLambda instruction into a class, we need to make sure the class
    * has the method.
    */
-  val indyLambdaHosts: mutable.Set[InternalName] = recordPerRunCache(mutable.Set.empty)
+  val indyLambdaImplMethods: mutable.AnyRefMap[InternalName, mutable.LinkedHashSet[asm.Handle]] = recordPerRunCache(mutable.AnyRefMap())
+  def addIndyLambdaImplMethod(hostClass: InternalName, handle: Seq[asm.Handle]): Seq[asm.Handle] = {
+    if (handle.isEmpty) Nil else {
+      val set = indyLambdaImplMethods.getOrElseUpdate(hostClass, mutable.LinkedHashSet())
+      val added = handle.filterNot(set)
+      set ++= handle
+      added
+    }
+  }
+  def removeIndyLambdaImplMethod(hostClass: InternalName, handle: Seq[asm.Handle]): Unit = {
+    if (handle.nonEmpty)
+      indyLambdaImplMethods.getOrElseUpdate(hostClass, mutable.LinkedHashSet()) --= handle
+  }
+
+  def getIndyLambdaImplMethods(hostClass: InternalName): Iterable[asm.Handle] = {
+    indyLambdaImplMethods.getOrNull(hostClass) match {
+      case null => Nil
+      case xs => xs
+    }
+  }
 
   /**
    * Obtain the BType for a type descriptor or internal name. For class descriptors, the ClassBType
@@ -225,8 +244,7 @@ abstract class BTypes {
 
     val inlineInfo = inlineInfoFromClassfile(classNode)
 
-    val classfileInterfaces: List[ClassBType] = classNode.interfaces.asScala.map(classBTypeFromParsedClassfile)(collection.breakOut)
-    val interfaces = classfileInterfaces.filterNot(i => inlineInfo.lateInterfaces.contains(i.internalName))
+    val interfaces: List[ClassBType] = classNode.interfaces.asScala.map(classBTypeFromParsedClassfile)(collection.breakOut)
 
     classBType.info = Right(ClassInfo(superClass, interfaces, flags, nestedClasses, nestedInfo, inlineInfo))
     classBType
@@ -271,7 +289,7 @@ abstract class BTypes {
     // The InlineInfo is built from the classfile (not from the symbol) for all classes that are NOT
     // being compiled. For those classes, the info is only needed if the inliner is enabled, othewise
     // we can save the memory.
-    if (!compilerSettings.YoptInlinerEnabled) BTypes.EmptyInlineInfo
+    if (!compilerSettings.optInlinerEnabled) BTypes.EmptyInlineInfo
     else fromClassfileAttribute getOrElse fromClassfileWithoutAttribute
   }
 
@@ -1146,27 +1164,7 @@ object BTypes {
   final case class InlineInfo(isEffectivelyFinal: Boolean,
                               sam: Option[String],
                               methodInfos: Map[String, MethodInlineInfo],
-                              warning: Option[ClassInlineInfoWarning]) {
-    /**
-     * A super call (invokespecial) to a default method T.m is only allowed if the interface T is
-     * a direct parent of the class. Super calls are introduced for example in Mixin when generating
-     * forwarder methods:
-     *
-     *   trait T { override def clone(): Object = "hi" }
-     *   trait U extends T
-     *   class C extends U
-     *
-     * The class C gets a forwarder that invokes T.clone(). During code generation the interface T
-     * is added as direct parent to class C. Note that T is not a (direct) parent in the frontend
-     * type of class C.
-     *
-     * All interfaces that are added to a class during code generation are added to this buffer and
-     * stored in the InlineInfo classfile attribute. This ensures that the ClassBTypes for a
-     * specific class is the same no matter if it's constructed from a Symbol or from a classfile.
-     * This is tested in BTypesFromClassfileTest.
-     */
-    val lateInterfaces: ListBuffer[InternalName] = ListBuffer.empty
-  }
+                              warning: Option[ClassInlineInfoWarning])
 
   val EmptyInlineInfo = InlineInfo(false, None, Map.empty, None)
 
@@ -1184,4 +1182,7 @@ object BTypes {
   // no static way (without symbol table instance) to get to nme.ScalaATTR / ScalaSignatureATTR
   val ScalaAttributeName    = "Scala"
   val ScalaSigAttributeName = "ScalaSig"
+
+  // when inlining, local variable names of the callee are prefixed with the name of the callee method
+  val InlinedLocalVariablePrefixMaxLenght = 128
 }

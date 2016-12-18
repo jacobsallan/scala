@@ -13,6 +13,7 @@ package page
 import base._
 import base.comment._
 
+import scala.reflect.internal.Reporter
 import scala.collection.mutable
 import scala.xml.{NodeSeq, Text, UnprefixedAttribute}
 import scala.language.postfixOps
@@ -22,10 +23,12 @@ import model.diagram._
 import diagram._
 
 trait EntityPage extends HtmlPage {
+  import ScalaDoc.SummaryReporter
+
   def universe: doc.Universe
   def generator: DiagramGenerator
   def tpl: DocTemplateEntity
-  def reporter: ScalaDocReporter
+  def docletReporter: Reporter
 
   override val path = templateToPath(tpl)
 
@@ -151,20 +154,7 @@ trait EntityPage extends HtmlPage {
 
   def search =
     <div id="search">
-        <span id="doc-title">
-          {universe.settings.doctitle.value}
-          <span id="doc-version">
-          {
-            val version = universe.settings.docversion.value
-
-            if (version.length > "XX.XX.XX-XXX".length) {
-              reporter.warning(null,
-                s"doc-version ($version) is too long to be displayed in the webview")
-              ""
-            } else version
-          }
-          </span>
-        </span>
+        <span id="doc-title">{universe.settings.doctitle.value}<span id="doc-version">{universe.settings.docversion.value}</span></span>
         <span class="close-results"><span class="left">&lt;</span> Back</span>
         <div id="textfilter">
           <span class="input">
@@ -1124,12 +1114,12 @@ object EntityPage {
     uni: doc.Universe,
     gen: DiagramGenerator,
     docTpl: DocTemplateEntity,
-    rep: ScalaDocReporter
+    rep: Reporter
   ): EntityPage = new EntityPage {
     def universe = uni
     def generator = gen
     def tpl = docTpl
-    def reporter = rep
+    def docletReporter = rep
   }
 
   /* Vlad: Lesson learned the hard way: don't put any stateful code that references the model here,

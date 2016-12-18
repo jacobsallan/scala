@@ -180,7 +180,7 @@ object scalac extends Command {
           Mono(Bold("@") & Argument("file")),
           "A text file containing compiler arguments (options and source files)")
 
-        // TODO - Add macros an dsuch here.
+        // TODO - Add macros and such here.
       )
     ),
 
@@ -379,8 +379,8 @@ object scalac extends Command {
           MItalic("posterasure"),
           "clean up erased inline classes"),
         Definition(
-          MItalic("lazyvals"),
-          "allocate bitmaps, translate lazy vals into lazified defs"),
+          MItalic("fields"),
+          "synthesize accessors and fields, including bitmaps for lazy vals"),
         Definition(
           MItalic("lambdalift"),
           "move nested functions to top level"),
@@ -474,7 +474,7 @@ object scalac extends Command {
 
   val exitStatus = Section("EXIT STATUS",
 
-    MBold(command) & " returns a zero exist status if it succeeds to " &
+    MBold(command) & " returns a zero exit status if it succeeds to " &
     "compile the specified input files. Non zero is returned in case " &
     "of failure.")
 

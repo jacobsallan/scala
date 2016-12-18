@@ -8,12 +8,12 @@ package scala.tools.nsc
 package backend
 package jvm
 
-import scala.collection.{ mutable, immutable }
+import scala.collection.{immutable, mutable}
 import scala.tools.nsc.symtab._
-
 import scala.tools.asm
 import GenBCode._
 import BackendReporting._
+import scala.tools.nsc.backend.jvm.BCodeHelpers.InvokeStyle
 
 /*
  *
@@ -112,14 +112,6 @@ abstract class BCodeSkelBuilder extends BCodeHelpers {
 
       gen(cd.impl)
 
-      val shouldAddLambdaDeserialize = (
-        settings.target.value == "jvm-1.8"
-          && settings.Ydelambdafy.value == "method"
-          && indyLambdaHosts.contains(cnode.name))
-
-      if (shouldAddLambdaDeserialize)
-        backendUtils.addLambdaDeserialize(cnode)
-
       cnode.visitAttribute(thisBType.inlineInfoAttribute.get)
 
       if (AsmUtils.traceClassEnabled && cnode.name.contains(AsmUtils.traceClassPattern))
@@ -164,8 +156,7 @@ abstract class BCodeSkelBuilder extends BCodeHelpers {
 
       } else {
 
-        val skipStaticForwarders = (claszSymbol.isInterface || settings.noForwarders)
-        if (!skipStaticForwarders) {
+        if (!settings.noForwarders) {
           val lmoc = claszSymbol.companionModule
           // add static forwarders if there are no name conflicts; see bugs #363 and #1735
           if (lmoc != NoSymbol) {
@@ -190,8 +181,15 @@ abstract class BCodeSkelBuilder extends BCodeHelpers {
      * can-multi-thread
      */
     private def addModuleInstanceField() {
+      // TODO confirm whether we really don't want ACC_SYNTHETIC nor ACC_DEPRECATED
+      // SD-194 This can't be FINAL on JVM 1.9+ because we assign it from within the
+      //        instance constructor, not from <clinit> directly. Assignment from <clinit>,
+      //        after the constructor has completely finished, seems like the principled
+      //        thing to do, but it would change behaviour when "benign" cyclic references
+      //        between modules exist.
+      val mods = GenBCode.PublicStatic
       val fv =
-        cnode.visitField(GenBCode.PublicStaticFinal, // TODO confirm whether we really don't want ACC_SYNTHETIC nor ACC_DEPRECATED
+        cnode.visitField(mods,
                          strMODULE_INSTANCE_FIELD,
                          thisBType.descriptor,
                          null, // no java-generic-signature
@@ -257,7 +255,6 @@ abstract class BCodeSkelBuilder extends BCodeHelpers {
     // used by genLoadTry() and genSynchronized()
     var earlyReturnVar: Symbol     = null
     var shouldEmitCleanup          = false
-    var insideCleanupBlock         = false
     // line numbers
     var lastEmittedLineNr          = -1
 
@@ -489,7 +486,27 @@ abstract class BCodeSkelBuilder extends BCodeHelpers {
 
         case ValDef(mods, name, tpt, rhs) => () // fields are added in `genPlainClass()`, via `addClassFields()`
 
-        case dd : DefDef => genDefDef(dd)
+        case dd : DefDef =>
+          val sym = dd.symbol
+          if (needsStaticImplMethod(sym)) {
+            if (sym.isMixinConstructor) {
+              val statified = global.gen.mkStatic(dd, sym.name, _.cloneSymbol)
+              genDefDef(statified)
+            } else {
+              val forwarderDefDef = {
+                val dd1 = global.gen.mkStatic(deriveDefDef(dd)(_ => EmptyTree), traitSuperAccessorName(sym), _.cloneSymbol.withoutAnnotations)
+                dd1.symbol.setFlag(Flags.ARTIFACT).resetFlag(Flags.OVERRIDE)
+                val selfParam :: realParams = dd1.vparamss.head.map(_.symbol)
+                deriveDefDef(dd1)(_ =>
+                  atPos(dd1.pos)(
+                    Apply(Select(global.gen.mkAttributedIdent(selfParam).setType(sym.owner.typeConstructor), dd.symbol),
+                    realParams.map(global.gen.mkAttributedIdent)).updateAttachment(UseInvokeSpecial))
+                )
+              }
+              genDefDef(forwarderDefDef)
+              genDefDef(dd)
+            }
+          } else genDefDef(dd)
 
         case Template(_, _, body) => body foreach gen
 

@@ -47,7 +47,7 @@ import scala.tools.nsc.backend.jvm.opt.BytecodeUtils._
  *   note that eliminating empty handlers and stale local variable descriptors is required for
  *   correctness, see the comment in the body of `methodOptimizations`.
  *
- * box-unbox elimination (eliminates box-unbox pairs withing the same method)
+ * box-unbox elimination (eliminates box-unbox pairs within the same method)
  *   + enables UPSTREAM:
  *     - nullness optimizations (a box extraction operation (unknown nullness) may be rewritten to
  *       a read of a non-null local. example in doc comment of box-unbox implementation)
@@ -191,7 +191,7 @@ class LocalOpt[BT <: BTypes](val btypes: BT) {
    * @return      `true` if unreachable code was eliminated in some method, `false` otherwise.
    */
   def methodOptimizations(clazz: ClassNode): Boolean = {
-    !compilerSettings.YoptNone && clazz.methods.asScala.foldLeft(false) {
+    !compilerSettings.optNone && clazz.methods.asScala.foldLeft(false) {
       case (changed, method) => methodOptimizations(method, clazz.name) || changed
     }
   }
@@ -231,7 +231,8 @@ class LocalOpt[BT <: BTypes](val btypes: BT) {
     // for local variables in dead blocks. Maybe that's a bug in the ASM framework.
 
     var currentTrace: String = null
-    val doTrace = compilerSettings.YoptTrace.isSetByUser && compilerSettings.YoptTrace.value == ownerClassName + "." + method.name
+    val methodPrefix = {val p = compilerSettings.YoptTrace.value; if (p == "_") "" else p }
+    val doTrace = compilerSettings.YoptTrace.isSetByUser && s"$ownerClassName.${method.name}".startsWith(methodPrefix)
     def traceIfChanged(optName: String): Unit = if (doTrace) {
       val after = AsmUtils.textify(method)
       if (currentTrace != after) {
@@ -261,46 +262,46 @@ class LocalOpt[BT <: BTypes](val btypes: BT) {
       traceIfChanged("beforeMethodOpt")
 
       // NULLNESS OPTIMIZATIONS
-      val runNullness = compilerSettings.YoptNullnessTracking && requestNullness
+      val runNullness = compilerSettings.optNullnessTracking && requestNullness
       val nullnessOptChanged = runNullness && nullnessOptimizations(method, ownerClassName)
       traceIfChanged("nullness")
 
       // UNREACHABLE CODE
       // Both AliasingAnalyzer (used in copyProp) and ProdConsAnalyzer (used in eliminateStaleStores,
       // boxUnboxElimination) require not having unreachable instructions (null frames).
-      val runDCE = (compilerSettings.YoptUnreachableCode && (requestDCE || nullnessOptChanged)) ||
-        compilerSettings.YoptBoxUnbox ||
-        compilerSettings.YoptCopyPropagation
+      val runDCE = (compilerSettings.optUnreachableCode && (requestDCE || nullnessOptChanged)) ||
+        compilerSettings.optBoxUnbox ||
+        compilerSettings.optCopyPropagation
       val (codeRemoved, liveLabels) = if (runDCE) removeUnreachableCodeImpl(method, ownerClassName) else (false, Set.empty[LabelNode])
       traceIfChanged("dce")
 
       // BOX-UNBOX
-      val runBoxUnbox = compilerSettings.YoptBoxUnbox && (requestBoxUnbox || nullnessOptChanged)
+      val runBoxUnbox = compilerSettings.optBoxUnbox && (requestBoxUnbox || nullnessOptChanged)
       val boxUnboxChanged = runBoxUnbox && boxUnboxElimination(method, ownerClassName)
       traceIfChanged("boxUnbox")
 
       // COPY PROPAGATION
-      val runCopyProp = compilerSettings.YoptCopyPropagation && (firstIteration || boxUnboxChanged)
+      val runCopyProp = compilerSettings.optCopyPropagation && (firstIteration || boxUnboxChanged)
       val copyPropChanged = runCopyProp && copyPropagation(method, ownerClassName)
       traceIfChanged("copyProp")
 
       // STALE STORES
-      val runStaleStores = compilerSettings.YoptCopyPropagation && (requestStaleStores || nullnessOptChanged || codeRemoved || boxUnboxChanged || copyPropChanged)
+      val runStaleStores = compilerSettings.optCopyPropagation && (requestStaleStores || nullnessOptChanged || codeRemoved || boxUnboxChanged || copyPropChanged)
       val storesRemoved = runStaleStores && eliminateStaleStores(method, ownerClassName)
       traceIfChanged("staleStores")
 
       // REDUNDANT CASTS
-      val runRedundantCasts = compilerSettings.YoptRedundantCasts && (firstIteration || boxUnboxChanged)
+      val runRedundantCasts = compilerSettings.optRedundantCasts && (firstIteration || boxUnboxChanged)
       val castRemoved = runRedundantCasts && eliminateRedundantCasts(method, ownerClassName)
       traceIfChanged("redundantCasts")
 
       // PUSH-POP
-      val runPushPop = compilerSettings.YoptCopyPropagation && (requestPushPop || firstIteration || storesRemoved || castRemoved)
+      val runPushPop = compilerSettings.optCopyPropagation && (requestPushPop || firstIteration || storesRemoved || castRemoved)
       val pushPopRemoved = runPushPop && eliminatePushPop(method, ownerClassName)
       traceIfChanged("pushPop")
 
       // STORE-LOAD PAIRS
-      val runStoreLoad = compilerSettings.YoptCopyPropagation && (requestStoreLoad || boxUnboxChanged || copyPropChanged || pushPopRemoved)
+      val runStoreLoad = compilerSettings.optCopyPropagation && (requestStoreLoad || boxUnboxChanged || copyPropChanged || pushPopRemoved)
       val storeLoadRemoved = runStoreLoad && eliminateStoreLoad(method)
       traceIfChanged("storeLoadPairs")
 
@@ -312,7 +313,7 @@ class LocalOpt[BT <: BTypes](val btypes: BT) {
 
       // SIMPLIFY JUMPS
       // almost all of the above optimizations enable simplifying more jumps, so we just run it in every iteration
-      val runSimplifyJumps = compilerSettings.YoptSimplifyJumps
+      val runSimplifyJumps = compilerSettings.optSimplifyJumps
       val jumpsChanged = runSimplifyJumps && simplifyJumps(method)
       traceIfChanged("simplifyJumps")
 
@@ -358,21 +359,21 @@ class LocalOpt[BT <: BTypes](val btypes: BT) {
         requestPushPop = true,
         requestStoreLoad = true,
         firstIteration = true)
-      if (compilerSettings.YoptUnreachableCode) unreachableCodeEliminated += method
+      if (compilerSettings.optUnreachableCode) unreachableCodeEliminated += method
       r
     } else (false, false)
 
     // (*) Removing stale local variable descriptors is required for correctness, see comment in `methodOptimizations`
     val localsRemoved =
-      if (compilerSettings.YoptCompactLocals) compactLocalVariables(method) // also removes unused
+      if (compilerSettings.optCompactLocals) compactLocalVariables(method) // also removes unused
       else if (requireEliminateUnusedLocals) removeUnusedLocalVariableNodes(method)() // (*)
       else false
     traceIfChanged("localVariables")
 
-    val lineNumbersRemoved = if (compilerSettings.YoptUnreachableCode) removeEmptyLineNumbers(method) else false
+    val lineNumbersRemoved = if (compilerSettings.optUnreachableCode) removeEmptyLineNumbers(method) else false
     traceIfChanged("lineNumbers")
 
-    val labelsRemoved = if (compilerSettings.YoptUnreachableCode) removeEmptyLabelNodes(method) else false
+    val labelsRemoved = if (compilerSettings.optUnreachableCode) removeEmptyLabelNodes(method) else false
     traceIfChanged("labels")
 
     // assert that local variable annotations are empty (we don't emit them) - otherwise we'd have
@@ -396,7 +397,7 @@ class LocalOpt[BT <: BTypes](val btypes: BT) {
    */
   def nullnessOptimizations(method: MethodNode, ownerClassName: InternalName): Boolean = {
     AsmAnalyzer.sizeOKForNullness(method) && {
-      lazy val nullnessAnalyzer = new AsmAnalyzer(method, ownerClassName, new NullnessAnalyzer(btypes))
+      lazy val nullnessAnalyzer = new AsmAnalyzer(method, ownerClassName, new NullnessAnalyzer(btypes, method))
 
       // When running nullness optimizations the method may still have unreachable code. Analyzer
       // frames of unreachable instructions are `null`.
@@ -827,8 +828,10 @@ object LocalOptImpls {
     /**
      * Replace jumps to a sequence of GOTO instructions by a jump to the final destination.
      *
+     * {{{
      *      Jump l;  [any ops];  l: GOTO m;  [any ops];  m: GOTO n;  [any ops];   n: NotGOTO; [...]
      *   => Jump n;  [rest unchanged]
+     * }}}
      *
      * If there's a loop of GOTOs, the initial jump is replaced by one of the labels in the loop.
      */
@@ -847,8 +850,10 @@ object LocalOptImpls {
     /**
      * Eliminates unnecessary jump instructions
      *
+     * {{{
      *      Jump l;  [nops];  l: [...]
      *   => POP*;    [nops];  l: [...]
+     * }}}
      *
      * Introduces 0, 1 or 2 POP instructions, depending on the number of values consumed by the Jump.
      */
@@ -864,8 +869,10 @@ object LocalOptImpls {
      * If the "else" part of a conditional branch is a simple GOTO, negates the conditional branch
      * and eliminates the GOTO.
      *
+     * {{{
      *      CondJump l;         [nops, no jump targets];  GOTO m;  [nops];  l: [...]
      *   => NegatedCondJump m;  [nops, no jump targets];           [nops];  l: [...]
+     * }}}
      *
      * Note that no jump targets are allowed in the first [nops] section. Otherwise, there could
      * be some other jump to the GOTO, and eliminating it would change behavior.
@@ -892,8 +899,10 @@ object LocalOptImpls {
     /**
      * Inlines xRETURN and ATHROW
      *
+     * {{{
      *      GOTO l;            [any ops];  l: xRETURN/ATHROW
      *   => xRETURN/ATHROW;    [any ops];  l: xRETURN/ATHROW
+     * }}}
      *
      * inlining is only done if the GOTO instruction is not part of a try block, otherwise the
      * rewrite might change the behavior. For xRETURN, the reason is that return instructions may throw

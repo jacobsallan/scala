@@ -59,7 +59,7 @@ abstract class SpecializeTypes extends InfoTransform with TypingTransformers {
   val phaseName: String = "specialize"
 
   /** The following flags may be set by this phase: */
-  override def phaseNewFlags: Long = notPRIVATE | lateFINAL
+  override def phaseNewFlags: Long = notPRIVATE
 
   /** This phase changes base classes. */
   override def changesBaseClasses = true
@@ -723,7 +723,7 @@ abstract class SpecializeTypes extends InfoTransform with TypingTransformers {
         } else if (!sClass.isTrait && m.isMethod && m.hasFlag(LAZY)) {
           forwardToOverload(m)
 
-        } else if (m.isValue && !m.isMethod && !m.hasFlag(LAZY)) { // concrete value definition
+        } else if (m.isValue && !m.isMethod) { // concrete value definition
           def mkAccessor(field: Symbol, name: Name) = {
             val newFlags = (SPECIALIZED | m.getterIn(clazz).flags) & ~(LOCAL | CASEACCESSOR | PARAMACCESSOR)
             // we rely on the super class to initialize param accessors
@@ -744,7 +744,14 @@ abstract class SpecializeTypes extends InfoTransform with TypingTransformers {
           enterMember(specVal)
           // create accessors
 
-          if (nme.isLocalName(m.name)) {
+          if (m.isLazy) {
+            // no getters needed (we'll specialize the compute method and accessor separately), can stay private
+            // m.setFlag(PRIVATE) -- TODO: figure out how to leave the non-specialized lazy var private
+            // (the implementation needs it to be visible while duplicating and retypechecking,
+            //  but it really could be private in bytecode)
+            specVal.setFlag(PRIVATE)
+          }
+          else if (nme.isLocalName(m.name)) {
             val specGetter = mkAccessor(specVal, specVal.getterName) setInfo MethodType(Nil, specVal.info)
             val origGetter = overrideIn(sClass, m.getterIn(clazz))
             info(origGetter) = Forward(specGetter)
@@ -1042,7 +1049,8 @@ abstract class SpecializeTypes extends InfoTransform with TypingTransformers {
             }
           }
           debuglog(s"specialized overload $om for ${overriding.name.decode} in ${pp(env)}: ${om.info}")
-          if (overriding.isAbstractOverride) om.setFlag(ABSOVERRIDE)
+          om.setFlag(overriding.flags & (ABSOVERRIDE | SYNCHRONIZED))
+          om.withAnnotations(overriding.annotations.filter(_.symbol == ScalaStrictFPAttr))
           typeEnv(om) = env
           addConcreteSpecMethod(overriding)
           if (overriding.isDeferred) { // abstract override
@@ -1329,6 +1337,7 @@ abstract class SpecializeTypes extends InfoTransform with TypingTransformers {
   class SpecializationDuplicator(casts: Map[Symbol, Type]) extends Duplicator(casts) {
     override def retyped(context: Context, tree: Tree, oldThis: Symbol, newThis: Symbol, env: scala.collection.Map[Symbol, Type]): Tree =
       enteringSpecialize(super.retyped(context, tree, oldThis, newThis, env))
+
   }
 
   /** A tree symbol substituter that substitutes on type skolems.
@@ -1911,8 +1920,7 @@ abstract class SpecializeTypes extends InfoTransform with TypingTransformers {
 
   /** Forward to the generic class constructor. If the current class initializes
    *  specialized fields corresponding to parameters, it passes null to the superclass
-   *  constructor. This saves the boxing cost for initializing generic fields that are
-   *  never used.
+   *  constructor.
    *
    *  For example:
    *  {{{
@@ -1926,7 +1934,17 @@ abstract class SpecializeTypes extends InfoTransform with TypingTransformers {
    *        super.this(null.asInstanceOf[Int], null.asInstanceOf[Int])
    *      }
    *    }
-   *  }}
+   *  }}}
+   *
+   *  Note that erasure first transforms `null.asInstanceOf[Int]` to `unbox(null)`, which is 0.
+   *  Then it adapts the argument `unbox(null)` of type Int to the erased parameter type of Tuple2,
+   *  which is Object, so it inserts a `box` call and we get `box(unbox(null))`, which is
+   *  `new Integer(0)` (not `null`).
+   *
+   *  However it does not make sense to create an Integer instance to be stored in the generic field
+   *  of the superclass: that field is never used. Therefore we mark the `null` tree with the
+   *  [[SpecializedSuperConstructorCallArgument]] attachment and special-case erasure to replace
+   *  `box(unbox(null))` by `null` in this case.
    */
   private def forwardCtorCall(pos: scala.reflect.internal.util.Position, receiver: Tree, paramss: List[List[ValDef]], clazz: Symbol): Tree = {
     log(s"forwardCtorCall($pos, $receiver, $paramss, $clazz)")
@@ -1945,7 +1963,7 @@ abstract class SpecializeTypes extends InfoTransform with TypingTransformers {
 
     val argss = mmap(paramss)(x =>
       if (initializesSpecializedField(x.symbol))
-        gen.mkAsInstanceOf(Literal(Constant(null)), x.symbol.tpe)
+        gen.mkAsInstanceOf(Literal(Constant(null)).updateAttachment(SpecializedSuperConstructorCallArgument), x.symbol.tpe)
       else
         Ident(x.symbol)
     )
@@ -1989,5 +2007,7 @@ abstract class SpecializeTypes extends InfoTransform with TypingTransformers {
       }
 
       resultTree
-    }  }
+    }
+  }
+  object SpecializedSuperConstructorCallArgument
 }

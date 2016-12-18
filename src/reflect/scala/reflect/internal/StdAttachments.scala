@@ -51,6 +51,8 @@ trait StdAttachments {
     */
   case class SAMFunction(samTp: Type, sam: Symbol) extends PlainAttachment
 
+  case object DelambdafyTarget extends PlainAttachment
+
   /** When present, indicates that the host `Ident` has been created from a backquoted identifier.
    */
   case object BackquotedIdentifierAttachment extends PlainAttachment
@@ -69,4 +71,20 @@ trait StdAttachments {
   abstract class InlineAnnotatedAttachment
   case object NoInlineCallsiteAttachment extends InlineAnnotatedAttachment
   case object InlineCallsiteAttachment extends InlineAnnotatedAttachment
+
+  /** Attached to a local class that has its outer field elided. A `null` constant may be passed
+    * in place of the outer parameter, can help callers to avoid capturing the outer instance.
+    */
+  case object OuterArgCanBeElided extends PlainAttachment
+
+  case object UseInvokeSpecial extends PlainAttachment
+
+  /** An attachment carrying information between uncurry and erasure */
+  case class TypeParamVarargsAttachment(val typeParamRef: Type)
+
+  /** Attached to a class symbol to indicate that its children have been observed
+    * via knownDirectSubclasses. Children added subsequently will trigger an
+    * error to indicate that the earlier observation was incomplete.
+    */
+  case object KnownDirectSubclassesCalled extends PlainAttachment
 }

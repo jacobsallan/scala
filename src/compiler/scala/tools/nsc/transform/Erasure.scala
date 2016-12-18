@@ -12,7 +12,7 @@ import symtab._
 import Flags._
 import scala.reflect.internal.Mode._
 
-abstract class Erasure extends AddInterfaces
+abstract class Erasure extends InfoTransform
                           with scala.reflect.internal.transform.Erasure
                           with typechecker.Analyzer
                           with TypingTransformers
@@ -189,18 +189,23 @@ abstract class Erasure extends AddInterfaces
 
   /* Drop redundant types (ones which are implemented by some other parent) from the immediate parents.
    * This is important on Android because there is otherwise an interface explosion.
+   * This is now restricted to Scala defined ancestors: a Java defined ancestor may need to be listed
+   * as an immediate parent to support an `invokespecial`.
    */
   def minimizeParents(parents: List[Type]): List[Type] = if (parents.isEmpty) parents else {
-    def isInterfaceOrTrait(sym: Symbol) = sym.isInterface || sym.isTrait
+    def isRedundantParent(sym: Symbol) = sym.isInterface || sym.isTrait
 
     var rest   = parents.tail
     var leaves = collection.mutable.ListBuffer.empty[Type] += parents.head
     while(rest.nonEmpty) {
       val candidate = rest.head
-      val nonLeaf = leaves exists { t => t.typeSymbol isSubClass candidate.typeSymbol }
-      if(!nonLeaf) {
-        leaves = leaves filterNot { t => isInterfaceOrTrait(t.typeSymbol) && (candidate.typeSymbol isSubClass t.typeSymbol) }
-        leaves += candidate
+      if (candidate.typeSymbol.isJavaDefined && candidate.typeSymbol.isInterface) leaves += candidate
+      else {
+        val nonLeaf = leaves exists { t => t.typeSymbol isSubClass candidate.typeSymbol }
+        if (!nonLeaf) {
+          leaves = leaves filterNot { t => isRedundantParent(t.typeSymbol) && (candidate.typeSymbol isSubClass t.typeSymbol) }
+          leaves += candidate
+        }
       }
       rest = rest.tail
     }
@@ -253,7 +258,7 @@ abstract class Erasure extends AddInterfaces
     // Anything which could conceivably be a module (i.e. isn't known to be
     // a type parameter or similar) must go through here or the signature is
     // likely to end up with Foo<T>.Empty where it needs Foo<T>.Empty$.
-    def fullNameInSig(sym: Symbol) = "L" + enteringJVM(sym.javaBinaryName)
+    def fullNameInSig(sym: Symbol) = "L" + enteringJVM(sym.javaBinaryNameString)
 
     def jsig(tp0: Type, existentiallyBound: List[Symbol] = Nil, toplevel: Boolean = false, primitiveOK: Boolean = true): String = {
       val tp = tp0.dealias
@@ -338,13 +343,24 @@ abstract class Erasure extends AddInterfaces
 
         case MethodType(params, restpe) =>
           val buf = new StringBuffer("(")
-          params foreach (p => buf append jsig(p.tpe))
+          params foreach (p => {
+            val tp = p.attachments.get[TypeParamVarargsAttachment] match {
+              case Some(att) =>
+                // For @varargs forwarders, a T* parameter has type Array[Object] in the forwarder
+                // instead of Array[T], as the latter would erase to Object (instead of Array[Object]).
+                // To make the generic signature correct ("[T", not "[Object"), an attachment on the
+                // parameter symbol stores the type T that was replaced by Object.
+                buf.append("["); att.typeParamRef
+              case _         => p.tpe
+            }
+            buf append jsig(tp)
+          })
           buf append ")"
           buf append (if (restpe.typeSymbol == UnitClass || sym0.isConstructor) VOID_TAG.toString else jsig(restpe))
           buf.toString
 
         case RefinedType(parents, decls) =>
-          boxedSig(intersectionDominator(parents))
+          jsig(intersectionDominator(parents), primitiveOK = primitiveOK)
         case ClassInfoType(parents, _, _) =>
           superSig(parents)
         case AnnotatedType(_, atp) =>
@@ -368,16 +384,53 @@ abstract class Erasure extends AddInterfaces
 
   class UnknownSig extends Exception
 
-  /**  The symbol's erased info. This is the type's erasure, except for the following symbols:
-   *
-   *   - For $asInstanceOf      : [T]T
-   *   - For $isInstanceOf      : [T]scala#Boolean
-   *   - For class Array        : [T]C where C is the erased classinfo of the Array class.
-   *   - For Array[T].<init>    : {scala#Int)Array[T]
-   *   - For a type parameter   : A type bounds type consisting of the erasures of its bounds.
-   */
-  override def transformInfo(sym: Symbol, tp: Type): Type =
-    transformMixinInfo(super.transformInfo(sym, tp))
+  // TODO: move to constructors?
+  object mixinTransformer extends Transformer {
+    /** Add calls to supermixin constructors
+      *    `super[mix].$init$()`
+      *  to tree, which is assumed to be the body of a constructor of class clazz.
+      */
+    private def addMixinConstructorCalls(tree: Tree, clazz: Symbol): Tree = {
+      def mixinConstructorCall(mc: Symbol): Tree = atPos(tree.pos) {
+        Apply(SuperSelect(clazz, mc.primaryConstructor), Nil)
+      }
+      val mixinConstructorCalls: List[Tree] = {
+        for (mc <- clazz.mixinClasses.reverse
+             if mc.isTrait && mc.primaryConstructor != NoSymbol)
+          yield mixinConstructorCall(mc)
+      }
+      tree match {
+
+        case Block(Nil, expr) =>
+          // AnyVal constructor - have to provide a real body so the
+          // jvm doesn't throw a VerifyError. But we can't add the
+          // body until now, because the typer knows that Any has no
+          // constructor and won't accept a call to super.init.
+          assert((clazz isSubClass AnyValClass) || clazz.info.parents.isEmpty, clazz)
+          Block(List(Apply(gen.mkSuperInitCall, Nil)), expr)
+
+        case Block(stats, expr) =>
+          // needs `hasSymbolField` check because `supercall` could be a block (named / default args)
+          val (presuper, supercall :: rest) = stats span (t => t.hasSymbolWhich(_ hasFlag PRESUPER))
+          treeCopy.Block(tree, presuper ::: (supercall :: mixinConstructorCalls ::: rest), expr)
+      }
+    }
+
+    override def transform(tree: Tree): Tree = {
+      val sym = tree.symbol
+      val tree1 = tree match {
+        case DefDef(_,_,_,_,_,_) if sym.isClassConstructor && sym.isPrimaryConstructor && sym.owner != ArrayClass =>
+          deriveDefDef(tree)(addMixinConstructorCalls(_, sym.owner)) // (3)
+        case Template(parents, self, body) =>
+          val parents1 = sym.owner.info.parents map (t => TypeTree(t) setPos tree.pos)
+          treeCopy.Template(tree, parents1, noSelfType, body)
+        case _ =>
+          tree
+      }
+      super.transform(tree1)
+    }
+  }
+
 
   val deconstMap = new TypeMap {
     // For some reason classOf[Foo] creates ConstantType(Constant(tpe)) with an actual Type for tpe,
@@ -499,11 +552,11 @@ abstract class Erasure extends AddInterfaces
       if (!bridgeNeeded)
         return
 
-      var newFlags = (member.flags | BRIDGE | ARTIFACT) & ~(ACCESSOR | DEFERRED | LAZY | lateDEFERRED)
+      var newFlags = (member.flags | BRIDGE | ARTIFACT) & ~(ACCESSOR | DEFERRED | LAZY)
       // If `member` is a ModuleSymbol, the bridge should not also be a ModuleSymbol. Otherwise we
       // end up with two module symbols with the same name in the same scope, which is surprising
       // when implementing later phases.
-      if (member.isModule) newFlags = (newFlags | METHOD) & ~(MODULE | lateMETHOD | STABLE)
+      if (member.isModule) newFlags = (newFlags | METHOD) & ~(MODULE | STABLE)
       val bridge = other.cloneSymbolImpl(root, newFlags) setPos root.pos
 
       debuglog("generating bridge from %s (%s): %s to %s: %s".format(
@@ -606,10 +659,8 @@ abstract class Erasure extends AddInterfaces
           // !!! Make pending/run/t5866b.scala work. The fix might be here and/or in unbox1.
           if (isPrimitiveValueType(targ.tpe) || isErasedValueType(targ.tpe)) {
             val noNullCheckNeeded = targ.tpe match {
-              case ErasedValueType(_, underlying) =>
-                isPrimitiveValueClass(underlying.typeSymbol)
-              case _ =>
-                true
+              case ErasedValueType(_, underlying) => isPrimitiveValueType(underlying)
+              case _ => true
             }
             if (noNullCheckNeeded) unbox(qual1, targ.tpe)
             else {
@@ -1042,7 +1093,7 @@ abstract class Erasure extends AddInterfaces
                 //    See SI-5568.
                 tree setSymbol Object_getClass
               } else {
-                devWarning(s"The symbol '${fn.symbol}' was interecepted but didn't match any cases, that means the intercepted methods set doesn't match the code")
+                devWarning(s"The symbol '${fn.symbol}' was intercepted but didn't match any cases, that means the intercepted methods set doesn't match the code")
                 tree
               }
             } else qual match {
@@ -1066,7 +1117,8 @@ abstract class Erasure extends AddInterfaces
 
         case TypeApply(fun, args) if (fun.symbol.owner != AnyClass &&
                                       fun.symbol != Object_asInstanceOf &&
-                                      fun.symbol != Object_isInstanceOf) =>
+                                      fun.symbol != Object_isInstanceOf &&
+                                      fun.symbol != Object_synchronized) =>
           // leave all other type tests/type casts, remove all other type applications
           preErase(fun)
 
@@ -1143,15 +1195,23 @@ abstract class Erasure extends AddInterfaces
         else {
           val tree1 = preErase(tree)
           tree1 match {
+            case TypeApply(fun, targs @ List(targ)) if (fun.symbol == Any_asInstanceOf  || fun.symbol == Object_synchronized) && targ.tpe == UnitTpe =>
+              // SI-9066 prevent transforming `o.asInstanceOf[Unit]` to `o.asInstanceOf[BoxedUnit]`.
+              // adaptMember will then replace the call by a reference to BoxedUnit.UNIT.
+              treeCopy.TypeApply(tree1, transform(fun), targs).clearType()
             case EmptyTree | TypeTree() =>
               tree1 setType specialScalaErasure(tree1.tpe)
             case ArrayValue(elemtpt, trees) =>
               treeCopy.ArrayValue(
                 tree1, elemtpt setType specialScalaErasure.applyInArray(elemtpt.tpe), trees map transform).clearType()
             case DefDef(_, _, _, _, tpt, _) =>
+              // TODO: move this in some post-processing transform in the fields phase?
+              if (fields.symbolAnnotationsTargetFieldAndGetter(tree.symbol))
+                fields.dropFieldAnnotationsFromGetter(tree.symbol)
+
               try super.transform(tree1).clearType()
               finally tpt setType specialErasure(tree1.symbol)(tree1.symbol.tpe).resultType
-            case ApplyDynamic(qual, Literal(Constant(boostrapMethodRef: Symbol)) :: _) =>
+            case ApplyDynamic(qual, Literal(Constant(bootstrapMethodRef: Symbol)) :: _) =>
               tree
             case _ =>
               super.transform(tree1).clearType()

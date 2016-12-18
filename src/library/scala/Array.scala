@@ -11,7 +11,6 @@ package scala
 import scala.collection.generic._
 import scala.collection.{ mutable, immutable }
 import mutable.{ ArrayBuilder, ArraySeq }
-import scala.compat.Platform.arraycopy
 import scala.reflect.ClassTag
 import scala.runtime.ScalaRunTime.{ array_apply, array_update }
 
@@ -102,7 +101,7 @@ object Array extends FallbackArrayBuilding {
   def copy(src: AnyRef, srcPos: Int, dest: AnyRef, destPos: Int, length: Int) {
     val srcClass = src.getClass
     if (srcClass.isArray && dest.getClass.isAssignableFrom(srcClass))
-      arraycopy(src, srcPos, dest, destPos, length)
+      java.lang.System.arraycopy(src, srcPos, dest, destPos, length)
     else
       slowcopy(src, srcPos, dest, destPos, length)
   }
@@ -496,16 +495,6 @@ object Array extends FallbackArrayBuilding {
  *  @hideImplicitConversion scala.Predef.refArrayOps
  *  @hideImplicitConversion scala.Predef.shortArrayOps
  *  @hideImplicitConversion scala.Predef.unitArrayOps
- *  @hideImplicitConversion scala.Predef._booleanArrayOps
- *  @hideImplicitConversion scala.Predef._byteArrayOps
- *  @hideImplicitConversion scala.Predef._charArrayOps
- *  @hideImplicitConversion scala.Predef._doubleArrayOps
- *  @hideImplicitConversion scala.Predef._floatArrayOps
- *  @hideImplicitConversion scala.Predef._intArrayOps
- *  @hideImplicitConversion scala.Predef._longArrayOps
- *  @hideImplicitConversion scala.Predef._refArrayOps
- *  @hideImplicitConversion scala.Predef._shortArrayOps
- *  @hideImplicitConversion scala.Predef._unitArrayOps
  *  @hideImplicitConversion scala.LowPriorityImplicits.wrapRefArray
  *  @hideImplicitConversion scala.LowPriorityImplicits.wrapIntArray
  *  @hideImplicitConversion scala.LowPriorityImplicits.wrapDoubleArray

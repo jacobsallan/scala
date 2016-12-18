@@ -53,6 +53,8 @@ abstract class MutableSettings extends AbsSettings {
   def printtypes: BooleanSetting
   def uniqid: BooleanSetting
   def verbose: BooleanSetting
+  def YpartialUnification: BooleanSetting
+  def Yvirtpatmat: BooleanSetting
 
   def Yrecursion: IntSetting
   def maxClassfileName: IntSetting

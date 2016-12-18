@@ -10,7 +10,9 @@ private[reflect] trait SynchronizedSymbols extends internal.Symbols { self: Symb
   private lazy val atomicIds = new java.util.concurrent.atomic.AtomicInteger(0)
   override protected def nextId() = atomicIds.incrementAndGet()
 
+  @deprecated("Global existential IDs no longer used", "2.12.1")
   private lazy val atomicExistentialIds = new java.util.concurrent.atomic.AtomicInteger(0)
+  @deprecated("Global existential IDs no longer used", "2.12.1")
   override protected def nextExistentialId() = atomicExistentialIds.incrementAndGet()
 
   private lazy val _recursionTable = mkThreadLocalStorage(immutable.Map.empty[Symbol, Int])
@@ -199,12 +201,7 @@ private[reflect] trait SynchronizedSymbols extends internal.Symbols { self: Symb
 
   trait SynchronizedTermSymbol extends SynchronizedSymbol
 
-  trait SynchronizedMethodSymbol extends MethodSymbol with SynchronizedTermSymbol {
-    // we can keep this lock fine-grained, because it's just a cache over asSeenFrom, which makes deadlocks impossible
-    // unfortunately we cannot elide this lock, because the cache depends on `pre`
-    private lazy val typeAsMemberOfLock = new Object
-    override def typeAsMemberOf(pre: Type): Type = gilSynchronizedIfNotThreadsafe { typeAsMemberOfLock.synchronized { super.typeAsMemberOf(pre) } }
-  }
+  trait SynchronizedMethodSymbol extends MethodSymbol with SynchronizedTermSymbol
 
   trait SynchronizedModuleSymbol extends ModuleSymbol with SynchronizedTermSymbol
 

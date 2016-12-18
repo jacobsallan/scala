@@ -7,44 +7,44 @@ chapter: 6
 # Expressions
 
 ```ebnf
-Expr         ::=  (Bindings | id | `_') `=>' Expr
+Expr         ::=  (Bindings | id | ‘_’) ‘=>’ Expr
                |  Expr1
-Expr1        ::=  `if' `(' Expr `)' {nl} Expr [[semi] `else' Expr]
-               |  `while' `(' Expr `)' {nl} Expr
-               |  `try' (`{' Block `}' | Expr) [`catch' `{' CaseClauses `}'] [`finally' Expr]
-               |  `do' Expr [semi] `while' `(' Expr ')'
-               |  `for' (`(' Enumerators `)' | `{' Enumerators `}') {nl} [`yield'] Expr
-               |  `throw' Expr
-               |  `return' [Expr]
-               |  [SimpleExpr `.'] id `=' Expr
-               |  SimpleExpr1 ArgumentExprs `=' Expr
+Expr1        ::=  ‘if’ ‘(’ Expr ‘)’ {nl} Expr [[semi] ‘else’ Expr]
+               |  ‘while’ ‘(’ Expr ‘)’ {nl} Expr
+               |  ‘try’ (‘{’ Block ‘}’ | Expr) [‘catch’ ‘{’ CaseClauses ‘}’] [‘finally’ Expr]
+               |  ‘do’ Expr [semi] ‘while’ ‘(’ Expr ‘)’
+               |  ‘for’ (‘(’ Enumerators ‘)’ | ‘{’ Enumerators ‘}’) {nl} [‘yield’] Expr
+               |  ‘throw’ Expr
+               |  ‘return’ [Expr]
+               |  [SimpleExpr ‘.’] id ‘=’ Expr
+               |  SimpleExpr1 ArgumentExprs ‘=’ Expr
                |  PostfixExpr
                |  PostfixExpr Ascription
-               |  PostfixExpr `match' `{' CaseClauses `}'
+               |  PostfixExpr ‘match’ ‘{’ CaseClauses ‘}’
 PostfixExpr  ::=  InfixExpr [id [nl]]
 InfixExpr    ::=  PrefixExpr
                |  InfixExpr id [nl] InfixExpr
-PrefixExpr   ::=  [`-' | `+' | `~' | `!'] SimpleExpr
-SimpleExpr   ::=  `new' (ClassTemplate | TemplateBody)
+PrefixExpr   ::=  [‘-’ | ‘+’ | ‘~’ | ‘!’] SimpleExpr
+SimpleExpr   ::=  ‘new’ (ClassTemplate | TemplateBody)
                |  BlockExpr
-               |  SimpleExpr1 [`_']
+               |  SimpleExpr1 [‘_’]
 SimpleExpr1  ::=  Literal
                |  Path
-               |  `_'
-               |  `(' [Exprs] `)'
-               |  SimpleExpr `.' id s
+               |  ‘_’
+               |  ‘(’ [Exprs] ‘)’
+               |  SimpleExpr ‘.’ id s
                |  SimpleExpr TypeArgs
                |  SimpleExpr1 ArgumentExprs
                |  XmlExpr
-Exprs        ::=  Expr {`,' Expr}
+Exprs        ::=  Expr {‘,’ Expr}
 BlockExpr    ::=  ‘{’ CaseClauses ‘}’
                |  ‘{’ Block ‘}’
 Block        ::=  BlockStat {semi BlockStat} [ResultExpr]
 ResultExpr   ::=  Expr1
-               |  (Bindings | ([`implicit'] id | `_') `:' CompoundType) `=>' Block
-Ascription   ::=  `:' InfixType
-               |  `:' Annotation {Annotation}
-               |  `:' `_' `*'
+               |  (Bindings | ([‘implicit’] id | ‘_’) ‘:’ CompoundType) ‘=>’ Block
+Ascription   ::=  ‘:’ InfixType
+               |  ‘:’ Annotation {Annotation}
+               |  ‘:’ ‘_’ ‘*’
 ```
 
 Expressions are composed of operators and operands. Expression forms are
@@ -100,7 +100,7 @@ A reference to any other member of the "null" object causes a
 
 ```ebnf
 SimpleExpr  ::=  Path
-              |  SimpleExpr `.' id
+              |  SimpleExpr ‘.’ id
 ```
 
 A designator refers to a named term. It can be a _simple name_ or
@@ -151,8 +151,8 @@ by a definition overriding $m$.
 ## This and Super
 
 ```ebnf
-SimpleExpr  ::=  [id `.'] `this'
-              |  [id '.'] `super' [ClassQualifier] `.' id
+SimpleExpr  ::=  [id ‘.’] ‘this’
+              |  [id ‘.’] ‘super’ [ClassQualifier] ‘.’ id
 ```
 
 The expression `this` can appear in the statement part of a
@@ -175,7 +175,9 @@ in the least proper supertype of the innermost template containing the
 reference.  It evaluates to the member $m'$ in the actual supertype of
 that template which is equal to $m$ or which overrides $m$.  The
 statically referenced member $m$ must be a type or a
-method.  <!-- explanation: so that we need not create several fields for overriding vals -->
+method.
+
+<!-- explanation: so that we need not create several fields for overriding vals -->
 
 If it is
 a method, it must be concrete, or the template
@@ -232,10 +234,10 @@ depending on whether `B` is mixed in with class `Root` or `A`.
 
 ```ebnf
 SimpleExpr    ::=  SimpleExpr1 ArgumentExprs
-ArgumentExprs ::=  `(' [Exprs] `)'
-                |  `(' [Exprs `,'] PostfixExpr `:' `_' `*' ')'
+ArgumentExprs ::=  ‘(’ [Exprs] ‘)’
+                |  ‘(’ [Exprs ‘,’] PostfixExpr ‘:’ ‘_’ ‘*’ ‘)’
                 |  [nl] BlockExpr
-Exprs         ::=  Expr {`,' Expr}
+Exprs         ::=  Expr {‘,’ Expr}
 ```
 
 An application `$f(e_1 , \ldots , e_m)$` applies the function `$f$` to the argument expressions `$e_1, \ldots , e_m$`. For this expression to be well-typed, the function must be *applicable* to its arguments, which is defined next by case analysis on $f$'s type.
@@ -404,7 +406,7 @@ On the Java platform version 7 and later, the methods `invoke` and `invokeExact`
 ## Method Values
 
 ```ebnf
-SimpleExpr    ::=  SimpleExpr1 `_'
+SimpleExpr    ::=  SimpleExpr1 ‘_’
 ```
 
 The expression `$e$ _` is well-formed if $e$ is of method
@@ -436,7 +438,7 @@ because otherwise the underscore would be considered part of the name.
 SimpleExpr    ::=  SimpleExpr TypeArgs
 ```
 
-A type application `$e$[$T_1 , \ldots , T_n$]` instantiates
+A _type application_ `$e$[$T_1 , \ldots , T_n$]` instantiates
 a polymorphic value $e$ of type
 `[$a_1$ >: $L_1$ <: $U_1, \ldots , a_n$ >: $L_n$ <: $U_n$]$S$`
 with argument types
@@ -459,10 +461,10 @@ and the expected result type.
 ## Tuples
 
 ```ebnf
-SimpleExpr   ::=  `(' [Exprs] `)'
+SimpleExpr   ::=  ‘(’ [Exprs] ‘)’
 ```
 
-A tuple expression `($e_1 , \ldots , e_n$)` is an alias
+A _tuple expression_ `($e_1 , \ldots , e_n$)` is an alias
 for the class instance creation
 `scala.Tuple$n$($e_1 , \ldots , e_n$)`, where $n \geq 2$.
 The empty tuple
@@ -471,10 +473,10 @@ The empty tuple
 ## Instance Creation Expressions
 
 ```ebnf
-SimpleExpr     ::=  `new' (ClassTemplate | TemplateBody)
+SimpleExpr     ::=  ‘new’ (ClassTemplate | TemplateBody)
 ```
 
-A simple instance creation expression is of the form
+A _simple instance creation expression_ is of the form
 `new $c$`
 where $c$ is a [constructor invocation](05-classes-and-objects.html#constructor-invocations). Let $T$ be
 the type of $c$. Then $T$ must
@@ -497,7 +499,7 @@ The expression is evaluated by creating a fresh
 object of type $T$ which is initialized by evaluating $c$. The
 type of the expression is $T$.
 
-A general instance creation expression is of the form
+A _general instance creation expression_ is of the form
 `new $t$` for some [class template](05-classes-and-objects.html#templates) $t$.
 Such an expression is equivalent to the block
 
@@ -542,7 +544,7 @@ BlockExpr  ::=  ‘{’ CaseClauses ‘}’
 Block      ::=  BlockStat {semi BlockStat} [ResultExpr]
 ```
 
-A block expression `{$s_1$; $\ldots$; $s_n$; $e\,$}` is
+A _block expression_ `{$s_1$; $\ldots$; $s_n$; $e\,$}` is
 constructed from a sequence of block statements $s_1 , \ldots , s_n$
 and a final expression $e$.  The statement sequence may not contain
 two definitions or declarations that bind the same name in the same
@@ -603,7 +605,7 @@ the existentially quantified type
 PostfixExpr     ::=  InfixExpr [id [nl]]
 InfixExpr       ::=  PrefixExpr
                   |  InfixExpr id [nl] InfixExpr
-PrefixExpr      ::=  [`-' | `+' | `!' | `~'] SimpleExpr
+PrefixExpr      ::=  [‘-’ | ‘+’ | ‘!’ | ‘~’] SimpleExpr
 ```
 
 Expressions can be constructed from operands and operators.
@@ -653,7 +655,7 @@ precedence, with characters on the same line having the same precedence.
 ```
 
 That is, operators starting with a letter have lowest precedence,
-followed by operators starting with ``|`', etc.
+followed by operators starting with ‘`|`’, etc.
 
 There's one exception to this rule, which concerns
 [_assignment operators_](#assignment-operators).
@@ -662,7 +664,7 @@ of simple assignment `(=)`. That is, it is lower than the
 precedence of any other operator.
 
 The _associativity_ of an operator is determined by the operator's
-last character.  Operators ending in a colon ``:`' are
+last character.  Operators ending in a colon ‘`:`’ are
 right-associative. All other operators are left-associative.
 
 Precedence and associativity of operators determine the grouping of
@@ -697,7 +699,7 @@ name.
 
 ### Assignment Operators
 
-An assignment operator is an operator symbol (syntax category
+An _assignment operator_ is an operator symbol (syntax category
 `op` in [Identifiers](01-lexical-syntax.html#identifiers)) that ends in an equals character
 “`=`”, with the exception of operators for which one of
 the following conditions holds:
@@ -733,10 +735,10 @@ The re-interpretation occurs if the following two conditions are fulfilled.
 ## Typed Expressions
 
 ```ebnf
-Expr1              ::=  PostfixExpr `:' CompoundType
+Expr1              ::=  PostfixExpr ‘:’ CompoundType
 ```
 
-The typed expression $e: T$ has type $T$. The type of
+The _typed expression_ $e: T$ has type $T$. The type of
 expression $e$ is expected to conform to $T$. The result of
 the expression is the value of $e$ converted to type $T$.
 
@@ -752,18 +754,18 @@ Here are examples of well-typed and ill-typed expressions.
 ## Annotated Expressions
 
 ```ebnf
-Expr1              ::=  PostfixExpr `:' Annotation {Annotation}
+Expr1              ::=  PostfixExpr ‘:’ Annotation {Annotation}
 ```
 
-An annotated expression `$e$: @$a_1$ $\ldots$ @$a_n$`
+An _annotated expression_ `$e$: @$a_1$ $\ldots$ @$a_n$`
 attaches [annotations](11-annotations.html#user-defined-annotations) $a_1 , \ldots , a_n$ to the
 expression $e$.
 
 ## Assignments
 
 ```ebnf
-Expr1        ::=  [SimpleExpr `.'] id `=' Expr
-               |  SimpleExpr1 ArgumentExprs `=' Expr
+Expr1        ::=  [SimpleExpr ‘.’] id ‘=’ Expr
+               |  SimpleExpr1 ArgumentExprs ‘=’ Expr
 ```
 
 The interpretation of an assignment to a simple variable `$x$ = $e$`
@@ -847,10 +849,10 @@ def matmul(xss: Array[Array[Double]], yss: Array[Array[Double]]) = {
 ## Conditional Expressions
 
 ```ebnf
-Expr1          ::=  `if' `(' Expr `)' {nl} Expr [[semi] `else' Expr]
+Expr1          ::=  ‘if’ ‘(’ Expr ‘)’ {nl} Expr [[semi] ‘else’ Expr]
 ```
 
-The conditional expression `if ($e_1$) $e_2$ else $e_3$` chooses
+The _conditional expression_ `if ($e_1$) $e_2$ else $e_3$` chooses
 one of the values of $e_2$ and $e_3$, depending on the
 value of $e_1$. The condition $e_1$ is expected to
 conform to type `Boolean`.  The then-part $e_2$ and the
@@ -873,10 +875,10 @@ evaluated as if it was `if ($e_1$) $e_2$ else ()`.
 ## While Loop Expressions
 
 ```ebnf
-Expr1          ::=  `while' `(' Expr ')' {nl} Expr
+Expr1          ::=  ‘while’ ‘(’ Expr ‘)’ {nl} Expr
 ```
 
-The while loop expression `while ($e_1$) $e_2$` is typed and
+The _while loop expression_ `while ($e_1$) $e_2$` is typed and
 evaluated as if it was an application of `whileLoop ($e_1$) ($e_2$)` where
 the hypothetical function `whileLoop` is defined as follows.
 
@@ -888,26 +890,26 @@ def whileLoop(cond: => Boolean)(body: => Unit): Unit  =
 ## Do Loop Expressions
 
 ```ebnf
-Expr1          ::=  `do' Expr [semi] `while' `(' Expr ')'
+Expr1          ::=  ‘do’ Expr [semi] ‘while’ ‘(’ Expr ‘)’
 ```
 
-The do loop expression `do $e_1$ while ($e_2$)` is typed and
+The _do loop expression_ `do $e_1$ while ($e_2$)` is typed and
 evaluated as if it was the expression `($e_1$ ; while ($e_2$) $e_1$)`.
 A semicolon preceding the `while` symbol of a do loop expression is ignored.
 
 ## For Comprehensions and For Loops
 
 ```ebnf
-Expr1          ::=  `for' (`(' Enumerators `)' | `{' Enumerators `}')
-                       {nl} [`yield'] Expr
+Expr1          ::=  ‘for’ (‘(’ Enumerators ‘)’ | ‘{’ Enumerators ‘}’)
+                       {nl} [‘yield’] Expr
 Enumerators    ::=  Generator {semi Generator}
-Generator      ::=  Pattern1 `<-' Expr {[semi] Guard | semi Pattern1 `=' Expr}
-Guard          ::=  `if' PostfixExpr
+Generator      ::=  Pattern1 ‘<-’ Expr {[semi] Guard | semi Pattern1 ‘=’ Expr}
+Guard          ::=  ‘if’ PostfixExpr
 ```
 
-A for loop `for ($\mathit{enums}\,$) $e$` executes expression $e$
-for each binding generated by the enumerators $\mathit{enums}$.  A for
-comprehension `for ($\mathit{enums}\,$) yield $e$` evaluates
+A _for loop_ `for ($\mathit{enums}\,$) $e$` executes expression $e$
+for each binding generated by the enumerators $\mathit{enums}$. 
+A _for comprehension_ `for ($\mathit{enums}\,$) yield $e$` evaluates
 expression $e$ for each binding generated by the enumerators $\mathit{enums}$
 and collects the results. An enumerator sequence always starts with a
 generator; this can be followed by further generators, value
@@ -943,7 +945,7 @@ comprehensions have been eliminated.
     `$e$.foreach { case $p$ => $e'$ }`.
   - A for comprehension
 
-    ```
+    ```scala
     for ($p$ <- $e$; $p'$ <- $e'; \ldots$) yield $e''$
     ```
 
@@ -951,13 +953,13 @@ comprehensions have been eliminated.
     sequence of generators, definitions, or guards,
     is translated to
 
-    ```
+    ```scala
     $e$.flatMap { case $p$ => for ($p'$ <- $e'; \ldots$) yield $e''$ }
     ```
 
   - A for loop
 
-    ```
+    ```scala
     for ($p$ <- $e$; $p'$ <- $e'; \ldots$) $e''$
     ```
 
@@ -965,7 +967,7 @@ comprehensions have been eliminated.
     sequence of generators, definitions, or guards,
     is translated to
 
-    ```
+    ```scala
     $e$.foreach { case $p$ => for ($p'$ <- $e'; \ldots$) $e''$ }
     ```
 
@@ -978,7 +980,7 @@ comprehensions have been eliminated.
     `$p'$ = $e'$` is translated to the following generator of pairs of values, where
     $x$ and $x'$ are fresh names:
 
-    ```
+    ```scala
     ($p$, $p'$) <- for ($x @ p$ <- $e$) yield { val $x' @ p'$ = $e'$; ($x$, $x'$) }
     ```
 
@@ -1046,10 +1048,10 @@ The code above makes use of the fact that `map`, `flatMap`,
 ## Return Expressions
 
 ```ebnf
-Expr1      ::=  `return' [Expr]
+Expr1      ::=  ‘return’ [Expr]
 ```
 
-A return expression `return $e$` must occur inside the body of some
+A _return expression_ `return $e$` must occur inside the body of some
 enclosing named method or function. The innermost enclosing named
 method or function in a source program, $f$, must have an explicitly declared result type,
 and the type of $e$ must conform to it.
@@ -1083,10 +1085,10 @@ and will propagate up the call stack.
 ## Throw Expressions
 
 ```ebnf
-Expr1      ::=  `throw' Expr
+Expr1      ::=  ‘throw’ Expr
 ```
 
-A throw expression `throw $e$` evaluates the expression
+A _throw expression_ `throw $e$` evaluates the expression
 $e$. The type of this expression must conform to
 `Throwable`.  If $e$ evaluates to an exception
 reference, evaluation is aborted with the thrown exception. If $e$
@@ -1100,11 +1102,11 @@ is `scala.Nothing`.
 ## Try Expressions
 
 ```ebnf
-Expr1 ::=  `try' (`{' Block `}' | Expr) [`catch' `{' CaseClauses `}']
-           [`finally' Expr]
+Expr1 ::=  ‘try’ (‘{’ Block ‘}’ | Expr) [‘catch’ ‘{’ CaseClauses ‘}’]
+           [‘finally’ Expr]
 ```
 
-A try expression is of the form `try { $b$ } catch $h$`
+A _try expression_ is of the form `try { $b$ } catch $h$`
 where the handler $h$ is a
 [pattern matching anonymous function](08-pattern-matching.html#pattern-matching-anonymous-functions)
 
@@ -1152,10 +1154,10 @@ for  `try { try { $b$ } catch $e_1$ } finally $e_2$`.
 ## Anonymous Functions
 
 ```ebnf
-Expr            ::=  (Bindings | [`implicit'] id | `_') `=>' Expr
-ResultExpr      ::=  (Bindings | ([`implicit'] id | `_') `:' CompoundType) `=>' Block
-Bindings        ::=  `(' Binding {`,' Binding} `)'
-Binding         ::=  (id | `_') [`:' Type]
+Expr            ::=  (Bindings | [‘implicit’] id | ‘_’) ‘=>’ Expr
+ResultExpr      ::=  (Bindings | ([‘implicit’] id | ‘_’) ‘:’ CompoundType) ‘=>’ Block
+Bindings        ::=  ‘(’ Binding {‘,’ Binding} ‘)’
+Binding         ::=  (id | ‘_’) [‘:’ Type]
 ```
 
 The anonymous function of arity $n$, `($x_1$: $T_1 , \ldots , x_n$: $T_n$) => e` maps parameters $x_i$ of types $T_i$ to a result given by expression $e$. The scope of each formal parameter $x_i$ is $e$. Formal parameters must have pairwise distinct names.
@@ -1213,7 +1215,7 @@ _ => 5                             // The function that ignores its argument
 ### Placeholder Syntax for Anonymous Functions
 
 ```ebnf
-SimpleExpr1  ::=  `_'
+SimpleExpr1  ::=  ‘_’
 ```
 
 An expression (of syntactic category `Expr`)
@@ -1278,7 +1280,7 @@ TemplateStat ::=  Import
                |
 ```
 
-Statements occur as parts of blocks and templates.  A statement can be
+Statements occur as parts of blocks and templates.  A _statement_ can be
 an import, a definition or an expression, or it can be empty.
 Statements used in the template of a class definition can also be
 declarations.  An expression that is used as a statement can have an
@@ -1359,6 +1361,7 @@ Note that a function literal that targets a SAM is not necessarily compiled to t
 
 It follows that:
   - if class `C` defines a constructor, it must be accessible and must define exactly one, empty, argument list;
+  - class `C` cannot be `final` or `sealed` (for simplicity we ignore the possibility of SAM conversion in the same compilation unit as the sealed class);
   - `m` cannot be polymorphic;
   - it must be possible to derive a fully-defined type `U` from `S` by inferring any unknown type parameters of `C`.
 
@@ -1426,9 +1429,14 @@ Let $\mathscr{B}$ be the set of alternatives in $\mathscr{A}$ that are [_applica
 to expressions $(e_1 , \ldots , e_n)$ of types $(\mathit{shape}(e_1) , \ldots , \mathit{shape}(e_n))$.
 If there is precisely one alternative in $\mathscr{B}$, that alternative is chosen.
 
-Otherwise, let $S_1 , \ldots , S_m$ be the vector of types obtained by
-typing each argument with an undefined expected type.  For every
-member $m$ in $\mathscr{B}$ one determines whether it is applicable
+Otherwise, let $S_1 , \ldots , S_m$ be the list of types obtained by typing each argument as follows.
+An argument `$e_i$` of the shape `($p_1$: $T_1 , \ldots , p_n$: $T_n$) => $b$` where one of the `$T_i$` is missing,
+i.e., a function literal with a missing parameter type, is typed with an expected function type that
+propagates the least upper bound of the fully defined types of the corresponding parameters of
+the ([SAM-converted](#sam-conversion)) function types specified by the `$i$`th argument type found in each alternative.
+All other arguments are typed with an undefined expected type.
+
+For every member $m$ in $\mathscr{B}$ one determines whether it is applicable
 to expressions ($e_1 , \ldots , e_m$) of types $S_1, \ldots , S_m$.
 
 It is an error if none of the members in $\mathscr{B}$ is applicable. If there is one

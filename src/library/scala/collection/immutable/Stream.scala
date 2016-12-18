@@ -23,7 +23,7 @@ import scala.language.implicitConversions
  *  import scala.math.BigInt
  *  object Main extends App {
  *
- *    val fibs: Stream[BigInt] = BigInt(0) #:: BigInt(1) #:: fibs.zip(fibs.tail).map { n => n._1 + n._2 }
+ *    lazy val fibs: Stream[BigInt] = BigInt(0) #:: BigInt(1) #:: fibs.zip(fibs.tail).map { n => n._1 + n._2 }
  *
  *    fibs take 5 foreach println
  *  }
@@ -46,7 +46,7 @@ import scala.language.implicitConversions
  *  import scala.math.BigInt
  *  object Main extends App {
  *
- *    val fibs: Stream[BigInt] = BigInt(0) #:: BigInt(1) #:: fibs.zip(
+ *    lazy val fibs: Stream[BigInt] = BigInt(0) #:: BigInt(1) #:: fibs.zip(
  *      fibs.tail).map(n => {
  *        println("Adding %d and %d".format(n._1, n._2))
  *        n._1 + n._2
@@ -162,7 +162,7 @@ import scala.language.implicitConversions
  *  // The first time we try to access the tail we're going to need more
  *  // information which will require us to recurse, which will require us to
  *  // recurse, which...
- *  val sov: Stream[Vector[Int]] = Vector(0) #:: sov.zip(sov.tail).map { n => n._1 ++ n._2 }
+ *  lazy val sov: Stream[Vector[Int]] = Vector(0) #:: sov.zip(sov.tail).map { n => n._1 ++ n._2 }
  *  }}}
  *
  *  The definition of `fibs` above creates a larger number of objects than
@@ -1029,6 +1029,8 @@ sealed abstract class Stream[+A] extends AbstractSeq[A]
    */
   override def stringPrefix = "Stream"
 
+  override def equals(that: Any): Boolean =
+    if (this eq that.asInstanceOf[AnyRef]) true else super.equals(that)
 }
 
 /** A specialized, extra-lazy implementation of a stream iterator, so it can
@@ -1170,6 +1172,27 @@ object Stream extends SeqFactory[Stream] {
         }
 
       tlVal
+    }
+
+    override /*LinearSeqOptimized*/
+    def sameElements[B >: A](that: GenIterable[B]): Boolean = {
+      @tailrec def consEq(a: Cons[_], b: Cons[_]): Boolean = {
+        if (a.head != b.head) false
+        else {
+          a.tail match {
+            case at: Cons[_] =>
+              b.tail match {
+                case bt: Cons[_] => (at eq bt) || consEq(at, bt)
+                case _ => false
+              }
+            case _ => b.tail.isEmpty
+          }
+        }
+      }
+      that match {
+        case that: Cons[_] => consEq(this, that)
+        case _ =>             super.sameElements(that)
+      }
     }
   }
 

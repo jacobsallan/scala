@@ -60,7 +60,7 @@ trait Contexts { self: Analyzer =>
   private lazy val allImportInfos =
     mutable.Map[CompilationUnit, List[ImportInfo]]() withDefaultValue Nil
 
-  def warnUnusedImports(unit: CompilationUnit) = {
+  def warnUnusedImports(unit: CompilationUnit) = if (!unit.isJava) {
     for (imps <- allImportInfos.remove(unit)) {
       for (imp <- imps.reverse.distinct) {
         val used = allUsedSelectors(imp)
@@ -586,8 +586,8 @@ trait Contexts { self: Analyzer =>
     }
 
 
-    def deprecationWarning(pos: Position, sym: Symbol, msg: String): Unit =
-      currentRun.reporting.deprecationWarning(fixPosition(pos), sym, msg)
+    def deprecationWarning(pos: Position, sym: Symbol, msg: String, since: String): Unit =
+      currentRun.reporting.deprecationWarning(fixPosition(pos), sym, msg, since)
     def deprecationWarning(pos: Position, sym: Symbol): Unit =
       currentRun.reporting.deprecationWarning(fixPosition(pos), sym) // TODO: allow this to escalate to an error, and implicit search will ignore deprecated implicits
 
@@ -1016,7 +1016,16 @@ trait Contexts { self: Analyzer =>
           || unit.exists && s.sourceFile != unit.source.file
         )
       )
-      def lookupInPrefix(name: Name)    = pre member name filter qualifies
+      def lookupInPrefix(name: Name)    = {
+        val sym = pre.member(name).filter(qualifies)
+        def isNonPackageNoModuleClass(sym: Symbol) =
+          sym.isClass && !sym.isModuleClass && !sym.isPackageClass
+        if (!sym.exists && unit.isJava && isNonPackageNoModuleClass(pre.typeSymbol)) {
+          // TODO factor out duplication with Typer::inCompanionForJavaStatic
+          val pre1 = companionSymbolOf(pre.typeSymbol, this).typeOfThis
+          pre1.member(name).filter(qualifies).andAlso(_ => pre = pre1)
+        } else sym
+      }
       def accessibleInPrefix(s: Symbol) = isAccessible(s, pre, superAccess = false)
 
       def searchPrefix = {
@@ -1177,6 +1186,27 @@ trait Contexts { self: Analyzer =>
       while (res == NoSymbol && ctx.outer != ctx) {
         val s = ctx.scope lookup name
         if (s != NoSymbol && s.owner == expectedOwner)
+          res = s
+        else
+          ctx = ctx.outer
+      }
+      res
+    }
+
+    final def lookupCompanionOf(original: Symbol): Symbol = {
+      lookupScopeEntry(original) match {
+        case null => NoSymbol
+        case entry => entry.owner.lookupCompanion(original)
+      }
+    }
+
+    /** Search scopes in current and enclosing contexts for the definition of `symbol` */
+    private def lookupScopeEntry(symbol: Symbol): ScopeEntry = {
+      var res: ScopeEntry = null
+      var ctx = this
+      while (res == null && ctx.outer != ctx) {
+        val s = ctx.scope lookupSymbolEntry symbol
+        if (s != null)
           res = s
         else
           ctx = ctx.outer

@@ -88,7 +88,7 @@ class Scalac extends ScalaMatchingTask with ScalacShared {
   object CompilerPhase extends PermissibleValue {
     val values = List("namer", "typer", "pickler", "refchecks",
                       "uncurry", "tailcalls", "specialize", "explicitouter",
-                      "erasure", "lazyvals", "lambdalift", "constructors",
+                      "erasure", "fields", "lambdalift", "constructors",
                       "flatten", "mixin", "delambdafy", "cleanup",
                       "jvm", "terminal")
   }
@@ -575,8 +575,6 @@ class Scalac extends ScalaMatchingTask with ScalacShared {
       settings.classpath.value = asString(getClasspath)
     if (!sourcepath.isEmpty)
       settings.sourcepath.value = asString(getSourcepath)
-    else if (origin.get.size() > 0)
-      settings.sourcepath.value = origin.get.list()(0)
     if (!bootclasspath.isEmpty)
       settings.bootclasspath.value = asString(getBootclasspath)
     if (!extdirs.isEmpty) settings.extdirs.value = asString(getExtdirs)

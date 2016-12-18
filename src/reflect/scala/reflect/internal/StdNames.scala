@@ -92,12 +92,15 @@ trait StdNames {
     def flattenedName(segments: Name*): NameType =
       compactify(segments mkString NAME_JOIN_STRING)
 
-    val NAME_JOIN_STRING: String              = NameTransformer.NAME_JOIN_STRING
-    val MODULE_SUFFIX_STRING: String          = NameTransformer.MODULE_SUFFIX_STRING
-    val LOCAL_SUFFIX_STRING: String           = NameTransformer.LOCAL_SUFFIX_STRING
-    val TRAIT_SETTER_SEPARATOR_STRING: String = NameTransformer.TRAIT_SETTER_SEPARATOR_STRING
-
-    val SINGLETON_SUFFIX: String     = ".type"
+    // TODO: what is the purpose of all this duplication!?!?!
+    // I made these constants because we cannot change them without bumping our major version anyway.
+    final val NAME_JOIN_STRING                 = NameTransformer.NAME_JOIN_STRING
+    final val MODULE_SUFFIX_STRING             = NameTransformer.MODULE_SUFFIX_STRING
+    final val MODULE_VAR_SUFFIX_STRING         = NameTransformer.MODULE_VAR_SUFFIX_STRING
+    final val LOCAL_SUFFIX_STRING              = NameTransformer.LOCAL_SUFFIX_STRING
+    final val LAZY_LOCAL_SUFFIX_STRING         = NameTransformer.LAZY_LOCAL_SUFFIX_STRING
+    final val TRAIT_SETTER_SEPARATOR_STRING    = NameTransformer.TRAIT_SETTER_SEPARATOR_STRING
+    final val SINGLETON_SUFFIX                 = ".type"
 
     val ANON_CLASS_NAME: NameType              = "$anon"
     val DELAMBDAFY_LAMBDA_CLASS_NAME: NameType = "$lambda"
@@ -106,7 +109,7 @@ trait StdNames {
     val EMPTY_PACKAGE_NAME: NameType           = "<empty>"
     val IMPORT: NameType                       = "<import>"
     val MODULE_SUFFIX_NAME: NameType           = MODULE_SUFFIX_STRING
-    val MODULE_VAR_SUFFIX: NameType            = "$module"
+    val MODULE_VAR_SUFFIX: NameType            = MODULE_VAR_SUFFIX_STRING
     val PACKAGE: NameType                      = "package"
     val ROOT: NameType                         = "<root>"
     val SPECIALIZED_SUFFIX: NameType           = "$sp"
@@ -240,6 +243,7 @@ trait StdNames {
 
     final val Any: NameType             = "Any"
     final val AnyVal: NameType          = "AnyVal"
+    final val App: NameType             = "App"
     final val FlagSet: NameType         = "FlagSet"
     final val Mirror: NameType          = "Mirror"
     final val Modifiers: NameType       = "Modifiers"
@@ -336,7 +340,6 @@ trait StdNames {
     val DEFAULT_CASE: NameType             = "defaultCase$"
     val EQEQ_LOCAL_VAR: NameType           = "eqEqTemp$"
     val FAKE_LOCAL_THIS: NameType          = "this$"
-    val LAZY_LOCAL: NameType               = "$lzy"
     val LAZY_SLOW_SUFFIX: NameType         = "$lzycompute"
     val UNIVERSE_BUILD_PREFIX: NameType    = "$u.internal.reificationSupport."
     val UNIVERSE_PREFIX: NameType          = "$u."
@@ -364,6 +367,7 @@ trait StdNames {
     val MODULE_INSTANCE_FIELD: NameType    = NameTransformer.MODULE_INSTANCE_NAME  // "MODULE$"
     val OUTER: NameType                    = "$outer"
     val OUTER_LOCAL: NameType              = OUTER.localName
+    val OUTER_ARG: NameType                = "arg" + OUTER
     val OUTER_SYNTH: NameType              = "<outer>" // emitted by virtual pattern matcher, replaced by outer accessor in explicitouter
     val ROOTPKG: NameType                  = "_root_"
     val SELECTOR_DUMMY: NameType           = "<unapply-selector>"
@@ -430,14 +434,14 @@ trait StdNames {
         name drop idx + 2
     }
 
-    @deprecated("Use unexpandedName", "2.11.0") def originalName(name: Name): Name            = unexpandedName(name)
-    @deprecated("Use Name#dropModule", "2.11.0") def stripModuleSuffix(name: Name): Name      = name.dropModule
-    @deprecated("Use Name#dropLocal", "2.11.0") def localToGetter(name: TermName): TermName   = name.dropLocal
-    @deprecated("Use Name#dropLocal", "2.11.0") def dropLocalSuffix(name: Name): TermName     = name.dropLocal
-    @deprecated("Use Name#localName", "2.11.0") def getterToLocal(name: TermName): TermName   = name.localName
-    @deprecated("Use Name#setterName", "2.11.0") def getterToSetter(name: TermName): TermName = name.setterName
-    @deprecated("Use Name#getterName", "2.11.0") def getterName(name: TermName): TermName     = name.getterName
-    @deprecated("Use Name#getterName", "2.11.0") def setterToGetter(name: TermName): TermName = name.getterName
+    @deprecated("use unexpandedName", "2.11.0") def originalName(name: Name): Name            = unexpandedName(name)
+    @deprecated("use Name#dropModule", "2.11.0") def stripModuleSuffix(name: Name): Name      = name.dropModule
+    @deprecated("use Name#dropLocal", "2.11.0") def localToGetter(name: TermName): TermName   = name.dropLocal
+    @deprecated("use Name#dropLocal", "2.11.0") def dropLocalSuffix(name: Name): TermName     = name.dropLocal
+    @deprecated("use Name#localName", "2.11.0") def getterToLocal(name: TermName): TermName   = name.localName
+    @deprecated("use Name#setterName", "2.11.0") def getterToSetter(name: TermName): TermName = name.setterName
+    @deprecated("use Name#getterName", "2.11.0") def getterName(name: TermName): TermName     = name.getterName
+    @deprecated("use Name#getterName", "2.11.0") def setterToGetter(name: TermName): TermName = name.getterName
 
     /**
      * Convert `Tuple2$mcII` to `Tuple2`, or `T1$sp` to `T1`.
@@ -701,6 +705,8 @@ trait StdNames {
     val immutable: NameType            = "immutable"
     val implicitly: NameType           = "implicitly"
     val in: NameType                   = "in"
+    val initialize : NameType          = "initialize"
+    val initialized : NameType         = "initialized"
     val internal: NameType             = "internal"
     val inlinedEquals: NameType        = "inlinedEquals"
     val isArray: NameType              = "isArray"
@@ -1169,6 +1175,7 @@ trait StdNames {
     final val Invoke: TermName           = newTermName("invoke")
     final val InvokeExact: TermName      = newTermName("invokeExact")
 
+    final val Metafactory: TermName         = newTermName("metafactory")
     final val AltMetafactory: TermName      = newTermName("altMetafactory")
     final val Bootstrap: TermName           = newTermName("bootstrap")
 

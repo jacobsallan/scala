@@ -95,6 +95,9 @@ class Global(var currentSettings: Settings, var reporter: Reporter)
 
   type ThisPlatform = JavaPlatform { val global: Global.this.type }
   lazy val platform: ThisPlatform  = new GlobalPlatform
+  /* A hook for the REPL to add a classpath entry containing products of previous runs to inliner's bytecode repository*/
+  // Fixes SI-8779
+  def optimizerClassPath(base: ClassPath): ClassPath = base
 
   def classPath: ClassPath = platform.classPath
 
@@ -181,6 +184,19 @@ class Global(var currentSettings: Settings, var reporter: Reporter)
       nodePrinters.infolevel = saved
     }
   }
+
+  private var propCnt = 0
+  @inline final def withPropagateCyclicReferences[T](t: => T): T = {
+    try {
+      propCnt = propCnt+1
+      t
+    } finally {
+      propCnt = propCnt-1
+      assert(propCnt >= 0)
+    }
+  }
+
+  def propagateCyclicReferences: Boolean = propCnt > 0
 
   /** Representing ASTs as graphs */
   object treeBrowsers extends {
@@ -325,14 +341,6 @@ class Global(var currentSettings: Settings, var reporter: Reporter)
       s"[search path for class files: ${classPath.asClassPathString}]"
     )
 
-  // The current division between scala.reflect.* and scala.tools.nsc.* is pretty
-  // clunky.  It is often difficult to have a setting influence something without having
-  // to create it on that side.  For this one my strategy is a constant def at the file
-  // where I need it, and then an override in Global with the setting.
-  override protected val etaExpandKeepsStar = settings.etaExpandKeepsStar.value
-  // Here comes another one...
-  override protected val enableTypeVarExperimentals = settings.Xexperimental.value
-
   def getSourceFile(f: AbstractFile): BatchSourceFile = new BatchSourceFile(f, reader read f)
 
   def getSourceFile(name: String): SourceFile = {
@@ -411,7 +419,7 @@ class Global(var currentSettings: Settings, var reporter: Reporter)
     override val initial = true
   }
 
-  import syntaxAnalyzer.{ UnitScanner, UnitParser }
+  import syntaxAnalyzer.{ UnitScanner, UnitParser, JavaUnitParser }
 
   // !!! I think we're overdue for all these phase objects being lazy vals.
   // There's no way for a Global subclass to provide a custom typer
@@ -456,7 +464,7 @@ class Global(var currentSettings: Settings, var reporter: Reporter)
   } with Pickler
 
   // phaseName = "refchecks"
-  override object refChecks extends {
+  object refChecks extends {
     val global: Global.this.type = Global.this
     val runsAfter = List("pickler")
     val runsRightAfter = None
@@ -476,10 +484,22 @@ class Global(var currentSettings: Settings, var reporter: Reporter)
     val runsRightAfter = None
   } with TailCalls
 
+  // phaseName = "fields"
+  object fields extends {
+    val global: Global.this.type = Global.this
+    // after refchecks, so it doesn't have to make weird exceptions for synthetic accessors
+    // after uncurry as it produces more work for the fields phase as well as being confused by it:
+    //   - sam expansion synthesizes classes, which may need trait fields mixed in
+    //   - the fields phase adds synthetic abstract methods to traits that should not disqualify them from being a SAM type
+    // before erasure: correct signatures & bridges for accessors
+    val runsAfter = List("uncurry")
+    val runsRightAfter = None
+  } with Fields
+
   // phaseName = "explicitouter"
   object explicitOuter extends {
     val global: Global.this.type = Global.this
-    val runsAfter = List("tailcalls")
+    val runsAfter = List("fields")
     val runsRightAfter = None
   } with ExplicitOuter
 
@@ -504,17 +524,11 @@ class Global(var currentSettings: Settings, var reporter: Reporter)
     val runsRightAfter = Some("erasure")
   } with PostErasure
 
-  // phaseName = "lazyvals"
-  object lazyVals extends {
-    val global: Global.this.type = Global.this
-    val runsAfter = List("erasure")
-    val runsRightAfter = None
-  } with LazyVals
 
   // phaseName = "lambdalift"
   object lambdaLift extends {
     val global: Global.this.type = Global.this
-    val runsAfter = List("lazyvals")
+    val runsAfter = List("erasure")
     val runsRightAfter = None
   } with LambdaLift
 
@@ -595,7 +609,7 @@ class Global(var currentSettings: Settings, var reporter: Reporter)
    *  This implementation creates a description map at the same time.
    */
   protected def computeInternalPhases(): Unit = {
-    // Note: this fits -Xshow-phases into 80 column width, which it is
+    // Note: this fits -Xshow-phases into 80 column width, which is
     // desirable to preserve.
     val phs = List(
       syntaxAnalyzer          -> "parse source into ASTs, perform simple desugaring",
@@ -608,12 +622,12 @@ class Global(var currentSettings: Settings, var reporter: Reporter)
       pickler                 -> "serialize symbol tables",
       refChecks               -> "reference/override checking, translate nested objects",
       uncurry                 -> "uncurry, translate function values to anonymous classes",
+      fields                  -> "synthesize accessors and fields, add bitmaps for lazy vals",
       tailCalls               -> "replace tail calls by jumps",
       specializeTypes         -> "@specialized-driven class and method specialization",
       explicitOuter           -> "this refs to outer pointers",
       erasure                 -> "erase types, add interfaces for traits",
       postErasure             -> "clean up erased inline classes",
-      lazyVals                -> "allocate bitmaps, translate lazy vals into lazified defs",
       lambdaLift              -> "move nested functions to top level",
       constructors            -> "move field definitions into constructors",
       mixer                   -> "mixin composition",
@@ -670,7 +684,7 @@ class Global(var currentSettings: Settings, var reporter: Reporter)
   }
 
   /** A description of the phases that will run in this configuration, or all if -Ydebug. */
-  def phaseDescriptions: String = phaseHelp("description", elliptically = true, phasesDescMap)
+  def phaseDescriptions: String = phaseHelp("description", elliptically = !settings.debug, phasesDescMap)
 
   /** Summary of the per-phase values of nextFlags and newFlags, shown under -Xshow-phases -Ydebug. */
   def phaseFlagDescriptions: String = {
@@ -681,7 +695,7 @@ class Global(var currentSettings: Settings, var reporter: Reporter)
       else if (ph.phaseNewFlags != 0L && ph.phaseNextFlags != 0L) fstr1 + " " + fstr2
       else fstr1 + fstr2
     }
-    phaseHelp("new flags", elliptically = false, fmt)
+    phaseHelp("new flags", elliptically = !settings.debug, fmt)
   }
 
   /** Emit a verbose phase table.
@@ -693,7 +707,7 @@ class Global(var currentSettings: Settings, var reporter: Reporter)
    *  @param elliptically whether to truncate the description with an ellipsis (...)
    *  @param describe how to describe a component
    */
-  def phaseHelp(title: String, elliptically: Boolean, describe: SubComponent => String) = {
+  private def phaseHelp(title: String, elliptically: Boolean, describe: SubComponent => String): String = {
     val Limit   = 16    // phase names should not be absurdly long
     val MaxCol  = 80    // because some of us edit on green screens
     val maxName = phaseNames map (_.length) max
@@ -708,13 +722,13 @@ class Global(var currentSettings: Settings, var reporter: Reporter)
     // built-in string precision merely truncates
     import java.util.{ Formattable, FormattableFlags, Formatter }
     def dotfmt(s: String) = new Formattable {
-      def elliptically(s: String, max: Int) = (
+      def foreshortened(s: String, max: Int) = (
         if (max < 0 || s.length <= max) s
         else if (max < 4) s.take(max)
         else s.take(max - 3) + "..."
       )
       override def formatTo(formatter: Formatter, flags: Int, width: Int, precision: Int) {
-        val p = elliptically(s, precision)
+        val p = foreshortened(s, precision)
         val w = if (width > 0 && p.length < width) {
           import FormattableFlags.LEFT_JUSTIFY
           val leftly = (flags & LEFT_JUSTIFY) == LEFT_JUSTIFY
@@ -740,7 +754,7 @@ class Global(var currentSettings: Settings, var reporter: Reporter)
                          else (p.phaseName, describe(p))
       fmt.format(name, idOf(p), text)
     }
-    line1 :: line2 :: (phaseDescriptors map mkText) mkString
+    (line1 :: line2 :: (phaseDescriptors map mkText)).mkString
   }
 
   /** Returns List of (phase, value) pairs, including only those
@@ -1042,6 +1056,8 @@ class Global(var currentSettings: Settings, var reporter: Reporter)
   def newUnitParser(code: String, filename: String = "<console>"): UnitParser =
     newUnitParser(newCompilationUnit(code, filename))
 
+  def newJavaUnitParser(unit: CompilationUnit): JavaUnitParser = new JavaUnitParser(unit)
+
   /** A Run is a single execution of the compiler on a set of units.
    */
   class Run extends RunContextApi with RunReporting with RunParsing {
@@ -1054,9 +1070,9 @@ class Global(var currentSettings: Settings, var reporter: Reporter)
     var currentUnit: CompilationUnit = NoCompilationUnit
 
     // used in sbt
-    def uncheckedWarnings: List[(Position, String)] = reporting.uncheckedWarnings
+    def uncheckedWarnings: List[(Position, String)]   = reporting.uncheckedWarnings.map{case (pos, (msg, since)) => (pos, msg)}
     // used in sbt
-    def deprecationWarnings: List[(Position, String)] = reporting.deprecationWarnings
+    def deprecationWarnings: List[(Position, String)] = reporting.deprecationWarnings.map{case (pos, (msg, since)) => (pos, msg)}
 
     private class SyncedCompilationBuffer { self =>
       private val underlying = new mutable.ArrayBuffer[CompilationUnit]
@@ -1237,12 +1253,12 @@ class Global(var currentSettings: Settings, var reporter: Reporter)
     val picklerPhase                 = phaseNamed("pickler")
     val refchecksPhase               = phaseNamed("refchecks")
     val uncurryPhase                 = phaseNamed("uncurry")
+    // val fieldsPhase                  = phaseNamed("fields")
     // val tailcallsPhase               = phaseNamed("tailcalls")
     val specializePhase              = phaseNamed("specialize")
     val explicitouterPhase           = phaseNamed("explicitouter")
     val erasurePhase                 = phaseNamed("erasure")
     val posterasurePhase             = phaseNamed("posterasure")
-    // val lazyvalsPhase                = phaseNamed("lazyvals")
     val lambdaliftPhase              = phaseNamed("lambdalift")
     // val constructorsPhase            = phaseNamed("constructors")
     val flattenPhase                 = phaseNamed("flatten")
@@ -1267,11 +1283,11 @@ class Global(var currentSettings: Settings, var reporter: Reporter)
     private def warnDeprecatedAndConflictingSettings(unit: CompilationUnit) {
       // issue warnings for any usage of deprecated settings
       settings.userSetSettings filter (_.isDeprecated) foreach { s =>
-        currentRun.reporting.deprecationWarning(NoPosition, s.name + " is deprecated: " + s.deprecationMessage.get)
+        currentRun.reporting.deprecationWarning(NoPosition, s.name + " is deprecated: " + s.deprecationMessage.get, "")
       }
       val supportedTarget = "jvm-1.8"
       if (settings.target.value != supportedTarget) {
-        currentRun.reporting.deprecationWarning(NoPosition, settings.target.name + ":" + settings.target.value + " is deprecated and has no effect, setting to " + supportedTarget)
+        currentRun.reporting.deprecationWarning(NoPosition, settings.target.name + ":" + settings.target.value + " is deprecated and has no effect, setting to " + supportedTarget, "2.12.0")
         settings.target.value = supportedTarget
       }
       settings.conflictWarning.foreach(reporter.warning(NoPosition, _))
@@ -1289,7 +1305,7 @@ class Global(var currentSettings: Settings, var reporter: Reporter)
 
     /** does this run compile given class, module, or case factory? */
     // NOTE: Early initialized members temporarily typechecked before the enclosing class, see typedPrimaryConstrBody!
-    //       Here we work around that wrinkle by claiming that a early-initialized member is compiled in
+    //       Here we work around that wrinkle by claiming that a pre-initialized member is compiled in
     //       *every* run. This approximation works because this method is exclusively called with `this` == `currentRun`.
     def compiles(sym: Symbol): Boolean =
       if (sym == NoSymbol) false

@@ -79,6 +79,22 @@ class BasePrintTest {
 
   @Test def testConstantLong = assertTreeCode(Literal(Constant(42l)))("42L")
 
+  val sq  = "\""
+  val tq  = "\"" * 3
+  val teq = "\"\"\\\""
+
+  @Test def testConstantMultiline = assertTreeCode(Literal(Constant("hello\nworld")))(s"${tq}hello\nworld${tq}")
+
+  @Test def testConstantFormfeed = assertTreeCode(Literal(Constant("hello\fworld")))(s"${sq}hello\\fworld${sq}")
+
+  @Test def testConstantControl = assertTreeCode(Literal(Constant("hello\u0003world")))(s"${sq}hello\\u0003world${sq}")
+
+  @Test def testConstantFormfeedChar = assertTreeCode(Literal(Constant('\f')))("'\\f'")
+
+  @Test def testConstantControlChar = assertTreeCode(Literal(Constant(3.toChar)))("'\\u0003'")
+
+  @Test def testConstantEmbeddedTriple = assertTreeCode(Literal(Constant(s"${tq}hello${tq}\nworld")))(s"${tq}${teq}hello${teq}\nworld${tq}")
+
   @Test def testOpExpr = assertPrintedCode("(5).+(4)", checkTypedTree = false)
 
   @Test def testName1 = assertPrintedCode("class test")
@@ -887,7 +903,7 @@ class TraitPrintTest {
     |  type Foo;
     |  type XString = scala.Predef.String
     |} with scala.Serializable {
-    |  val z = 7
+    |  val z: scala.Int = 7
     |}""")
 
   @Test def testTraitWithSingletonTypeTree = assertPrintedCode(sm"""
@@ -992,23 +1008,16 @@ class ValAndDefPrintTest {
 
   @Test def testDef9 = assertPrintedCode("def a(x: scala.Int)(implicit z: scala.Double, y: scala.Float): scala.Unit = ()")
 
-  @Test def testDefWithLazyVal1 = assertResultCode(
-    code = "def a = { lazy val test: Int = 42 }")(
-    parsedCode = sm"""
-    |def a = {
-    |  lazy val test: Int = 42;
-    |  ()
-    |}
-    """,
-    typedCode = sm"""
+  @Test def testDefWithLazyVal1 = assertPrintedCode(sm"""
     |def a = {
     |  lazy val test: scala.Int = 42;
     |  ()
-    |}""")
+    |}
+    """)
 
   @Test def testDefWithLazyVal2 = assertPrintedCode(sm"""
     |def a = {
-    |  lazy val test: Unit = {
+    |  lazy val test: scala.Unit = {
     |    scala.Predef.println();
     |    scala.Predef.println()
     |  };

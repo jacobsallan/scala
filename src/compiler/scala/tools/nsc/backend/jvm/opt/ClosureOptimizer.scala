@@ -17,7 +17,6 @@ import scala.tools.nsc.backend.jvm.BTypes.InternalName
 import BytecodeUtils._
 import BackendReporting._
 import Opcodes._
-import scala.tools.nsc.backend.jvm.opt.ByteCodeRepository.CompilationUnit
 import scala.collection.JavaConverters._
 
 class ClosureOptimizer[BT <: BTypes](val btypes: BT) {
@@ -326,8 +325,7 @@ class ClosureOptimizer[BT <: BTypes](val btypes: BT) {
         insns.insertBefore(invocation, new InsnNode(DUP))
         INVOKESPECIAL
     }
-    val isInterface = bodyOpcode == INVOKEINTERFACE
-    val bodyInvocation = new MethodInsnNode(bodyOpcode, lambdaBodyHandle.getOwner, lambdaBodyHandle.getName, lambdaBodyHandle.getDesc, isInterface)
+    val bodyInvocation = new MethodInsnNode(bodyOpcode, lambdaBodyHandle.getOwner, lambdaBodyHandle.getName, lambdaBodyHandle.getDesc, lambdaBodyHandle.isInterface)
     ownerMethod.instructions.insertBefore(invocation, bodyInvocation)
 
     val bodyReturnType = Type.getReturnType(lambdaBodyHandle.getDesc)
@@ -354,16 +352,15 @@ class ClosureOptimizer[BT <: BTypes](val btypes: BT) {
 
     // the method node is needed for building the call graph entry
     val bodyMethod = byteCodeRepository.methodNode(lambdaBodyHandle.getOwner, lambdaBodyHandle.getName, lambdaBodyHandle.getDesc)
-    def bodyMethodIsBeingCompiled = byteCodeRepository.classNodeAndSource(lambdaBodyHandle.getOwner).map(_._2 == CompilationUnit).getOrElse(false)
+    val sourceFilePath = byteCodeRepository.compilingClasses.get(lambdaBodyHandle.getOwner).map(_._2)
     val callee = bodyMethod.map({
       case (bodyMethodNode, bodyMethodDeclClass) =>
         val bodyDeclClassType = classBTypeFromParsedClassfile(bodyMethodDeclClass)
-        val canInlineFromSource = compilerSettings.YoptInlineGlobal || bodyMethodIsBeingCompiled
         Callee(
           callee = bodyMethodNode,
           calleeDeclarationClass = bodyDeclClassType,
-          safeToInline = canInlineFromSource,
-          canInlineFromSource = canInlineFromSource,
+          isStaticallyResolved = true,
+          sourceFilePath = sourceFilePath,
           annotatedInline = false,
           annotatedNoInline = false,
           samParamTypes = callGraph.samParamTypes(bodyMethodNode, bodyDeclClassType),
@@ -395,7 +392,7 @@ class ClosureOptimizer[BT <: BTypes](val btypes: BT) {
     // (x: T) => ??? has return type Nothing$, and an ATHROW is added (see fixLoadedNothingOrNullValue).
     unreachableCodeEliminated -= ownerMethod
 
-    if (hasAdaptedImplMethod(closureInit) && inliner.canInlineBody(bodyMethodCallsite).isEmpty)
+    if (hasAdaptedImplMethod(closureInit) && inliner.canInlineCallsite(bodyMethodCallsite).isEmpty)
       inliner.inlineCallsite(bodyMethodCallsite)
   }
 
